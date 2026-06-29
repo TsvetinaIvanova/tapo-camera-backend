@@ -1,0 +1,22 @@
+# Terraform
+terraform/.terraform/
+terraform/.terraform.lock.hcl
+terraform/terraform.tfstate
+terraform/terraform.tfstate.backup
+terraform/terraform.tfvars
+
+# Config
+poller/config.yaml
+
+# Python
+__pycache__/
+*.pyc
+.env
+
+# Other
+test_connection.py
+poller/get_videos.py
+poller/tapo-poller.service
+tapo_project_status.md
+frontend/
+NOTES.md
