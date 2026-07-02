@@ -14,7 +14,6 @@ __pycache__/
 .env
 
 # Other
-test_connection.py
 poller/get_videos.py
 poller/tapo-poller.service
 tapo_project_status.md
