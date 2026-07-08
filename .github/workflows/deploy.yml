@@ -1,0 +1,136 @@
+name: Deploy
+
+on:
+  push:
+    branches: ["main"]
+
+env:
+  PYTHON_VERSION: "3.12"
+  TF_VERSION: "1.9.0"
+  AWS_REGION: eu-central-1
+
+jobs:
+
+  # ── Terraform apply ─────────────────────────────────────
+  terraform:
+    name: Terraform apply
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+
+    outputs:
+      processor_function: ${{ steps.tf-output.outputs.processor_function }}
+      query_function: ${{ steps.tf-output.outputs.query_function }}
+      frontend_bucket: ${{ steps.tf-output.outputs.frontend_bucket }}
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false   # needed to capture outputs cleanly
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Terraform init
+        working-directory: terraform
+        run: terraform init
+
+      - name: Terraform apply
+        working-directory: terraform
+        run: terraform apply -auto-approve
+
+      - name: Capture Terraform outputs
+        id: tf-output
+        working-directory: terraform
+        run: |
+          echo "processor_function=$(terraform output -raw lambda_function_name)" >> $GITHUB_OUTPUT
+          echo "query_function=$(terraform output -raw lambda_function_name_query 2>/dev/null || echo 'tapo-clip-query')" >> $GITHUB_OUTPUT
+          echo "frontend_bucket=$(terraform output -raw frontend_bucket)" >> $GITHUB_OUTPUT
+
+  # ── Deploy Lambda code ──────────────────────────────────
+  # Runs after Terraform so infrastructure is guaranteed to exist first.
+  # Even though Terraform also updates Lambda code via archive_file,
+  # this step does a direct UpdateFunctionCode as a fast-path for
+  # code-only changes where you don't want to wait for a full apply.
+  deploy-lambdas:
+    name: Deploy Lambda code
+    runs-on: ubuntu-latest
+    needs: terraform
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Package and deploy processor Lambda
+        run: |
+          cd terraform/lambda/processor
+          zip handler.zip handler.py
+          aws lambda update-function-code \
+            --function-name tapo-clip-processor \
+            --zip-file fileb://handler.zip \
+            --region ${{ env.AWS_REGION }}
+
+      - name: Package and deploy query Lambda
+        run: |
+          cd terraform/lambda/query
+          zip handler.zip handler.py
+          aws lambda update-function-code \
+            --function-name tapo-clip-query \
+            --zip-file fileb://handler.zip \
+            --region ${{ env.AWS_REGION }}
+
+      - name: Wait for Lambda updates to complete
+        run: |
+          aws lambda wait function-updated \
+            --function-name tapo-clip-processor \
+            --region ${{ env.AWS_REGION }}
+          aws lambda wait function-updated \
+            --function-name tapo-clip-query \
+            --region ${{ env.AWS_REGION }}
+          echo "✅ Both Lambdas updated successfully"
+
+  # ── Deploy frontend ─────────────────────────────────────
+  deploy-frontend:
+    name: Deploy frontend
+    runs-on: ubuntu-latest
+    needs: terraform
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Deploy frontend to S3
+        run: |
+          aws s3 cp frontend/index.html \
+            s3://${{ needs.terraform.outputs.frontend_bucket }}/index.html \
+            --content-type "text/html" \
+            --cache-control "no-cache"
+          echo "✅ Frontend deployed"
