@@ -62,7 +62,6 @@ def query_by_date_and_camera(date: str, camera_id: str) -> list:
     from datetime import datetime, timezone
 
     # Convert date to Unix timestamp range
-    from datetime import datetime, timezone
     dt    = datetime.strptime(date, "%Y%m%d").replace(tzinfo=timezone.utc)
     start = int(dt.timestamp())
     end   = start + 86400 - 1

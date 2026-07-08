@@ -12,7 +12,6 @@ import asyncio
 import json
 import logging
 import os
-import sys
 import time
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
@@ -246,7 +245,7 @@ async def poll_camera(
                         new_last_seen = clip["startTime"]
                 else:
                     logger.warning(
-                        f"  ⚠️  Upload failed — keeping local file for retry next run"
+                        "  ⚠️  Upload failed — keeping local file for retry next run"
                     )
             else:
                 logger.warning(f"  ⚠️  Download failed or skipped for clip at {clip['startTime']}")

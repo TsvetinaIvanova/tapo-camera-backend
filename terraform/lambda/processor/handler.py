@@ -13,7 +13,6 @@ Expected S3 key format:
   e.g. clips/c225_front/20260617/c225_front_081430_67s.mp4
 """
 
-import json
 import logging
 import os
 import subprocess
