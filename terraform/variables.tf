@@ -20,3 +20,9 @@ variable "poller_user_name" {
   type        = string
   default     = "tapo-poller"
 }
+
+variable "bucket_name" {
+  description = "Globally unique S3 bucket name for camera clips"
+  type        = string
+  default     = "vladaya-tapo-cameras"   # your actual bucket name
+}
