@@ -13,7 +13,6 @@ Expected S3 key format:
   e.g. clips/c225_front/20260617/c225_front_081430_67s.mp4
 """
 
-import json
 import logging
 import os
 import subprocess
@@ -29,15 +28,15 @@ logger.setLevel(logging.INFO)
 s3 = boto3.client("s3")
 dynamodb = boto3.resource("dynamodb")
 
-TABLE_NAME       = os.environ["DYNAMODB_TABLE"]
-S3_BUCKET        = os.environ["S3_BUCKET"]
+TABLE_NAME = os.environ["DYNAMODB_TABLE"]
+S3_BUCKET = os.environ["S3_BUCKET"]
 THUMBNAIL_PREFIX = os.environ.get("THUMBNAIL_PREFIX", "thumbnails")
-TTL_DAYS         = int(os.environ.get("TTL_DAYS", "365"))
+TTL_DAYS = int(os.environ.get("TTL_DAYS", "365"))
 
 table = dynamodb.Table(TABLE_NAME)
 
-FFMPEG_PATH  = "/opt/bin/ffmpeg"   # provided by the Lambda layer
-TMP_DIR      = "/tmp"
+FFMPEG_PATH = "/opt/bin/ffmpeg"   # provided by the Lambda layer
+TMP_DIR = "/tmp"
 
 
 def parse_s3_key(s3_key: str) -> dict:
@@ -72,7 +71,7 @@ def parse_s3_key(s3_key: str) -> dict:
     dt = datetime.strptime(f"{date_str}{time_str}", "%Y%m%d%H%M%S")
     dt = dt.replace(tzinfo=timezone.utc)
     start_time = int(dt.timestamp())
-    end_time   = start_time + duration_s
+    end_time = start_time + duration_s
 
     return {
         "camera_id":  camera_id,
@@ -116,7 +115,9 @@ def generate_thumbnail(clip_path: str, thumbnail_path: str) -> bool:
         )
         if result.returncode != 0:
             # Clip may be shorter than 1s — retry from frame 0
-            logger.warning(f"ffmpeg at 1s failed, retrying from frame 0: {result.stderr}")
+            logger.warning(
+                f"ffmpeg at 1s failed, retrying from frame 0: {result.stderr}"
+            )
             cmd[2] = "0"
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
 
@@ -188,9 +189,9 @@ def cleanup(*paths: str) -> None:
 
 def process_record(record: dict) -> None:
     """Process a single S3 event record."""
-    bucket  = record["s3"]["bucket"]["name"]
-    s3_key  = record["s3"]["object"]["key"]
-    s3_key  = s3_key.replace("+", " ")   # S3 URL-encodes spaces as +
+    bucket = record["s3"]["bucket"]["name"]
+    s3_key = record["s3"]["object"]["key"]
+    s3_key = s3_key.replace("+", " ")   # S3 URL-encodes spaces as +
 
     logger.info(f"Processing: s3://{bucket}/{s3_key}")
 
@@ -201,10 +202,12 @@ def process_record(record: dict) -> None:
         logger.error(f"Skipping — could not parse key: {e}")
         return
 
-    clip_name      = parsed["filename"].replace(".mp4", "")
-    local_clip     = os.path.join(TMP_DIR, parsed["filename"])
-    local_thumb    = os.path.join(TMP_DIR, f"{clip_name}.jpg")
-    thumbnail_key  = f"{THUMBNAIL_PREFIX}/{parsed['camera_id']}/{parsed['date']}/{clip_name}.jpg"
+    clip_name = parsed["filename"].replace(".mp4", "")
+    local_clip = os.path.join(TMP_DIR, parsed["filename"])
+    local_thumb = os.path.join(TMP_DIR, f"{clip_name}.jpg")
+    thumbnail_key = (
+        f"{THUMBNAIL_PREFIX}/{parsed['camera_id']}/{parsed['date']}/{clip_name}.jpg"
+    )
 
     try:
         # 1. Download clip

@@ -24,12 +24,12 @@ from botocore.exceptions import ClientError
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-dynamodb   = boto3.resource("dynamodb")
-s3_client  = boto3.client("s3")
+dynamodb = boto3.resource("dynamodb")
+s3_client = boto3.client("s3")
 
-TABLE_NAME  = os.environ["DYNAMODB_TABLE"]
-S3_BUCKET   = os.environ["S3_BUCKET"]
-URL_EXPIRY  = int(os.environ.get("PRESIGNED_URL_EXPIRY", "3600"))
+TABLE_NAME = os.environ["DYNAMODB_TABLE"]
+S3_BUCKET = os.environ["S3_BUCKET"]
+URL_EXPIRY = int(os.environ.get("PRESIGNED_URL_EXPIRY", "3600"))
 
 table = dynamodb.Table(TABLE_NAME)
 
@@ -62,17 +62,15 @@ def query_by_date_and_camera(date: str, camera_id: str) -> list:
     from datetime import datetime, timezone
 
     # Convert date to Unix timestamp range
-    from datetime import datetime, timezone
-    dt    = datetime.strptime(date, "%Y%m%d").replace(tzinfo=timezone.utc)
+    dt = datetime.strptime(date, "%Y%m%d").replace(tzinfo=timezone.utc)
     start = int(dt.timestamp())
-    end   = start + 86400 - 1
+    end = start + 86400 - 1
 
     response = table.query(
         KeyConditionExpression=(
-            DKey("camera_id").eq(camera_id) &
-            DKey("start_time").between(start, end)
+            DKey("camera_id").eq(camera_id) & DKey("start_time").between(start, end)
         ),
-        ScanIndexForward=False,   # most recent first
+        ScanIndexForward=False,  # most recent first
     )
     return response.get("Items", [])
 
@@ -82,7 +80,7 @@ def query_by_date(date: str) -> list:
     response = table.query(
         IndexName="date-start_time-index",
         KeyConditionExpression=Key("date").eq(date),
-        ScanIndexForward=False,   # most recent first
+        ScanIndexForward=False,  # most recent first
     )
     return response.get("Items", [])
 
@@ -91,7 +89,7 @@ def enrich_with_urls(items: list) -> list:
     """Add presigned video and thumbnail URLs to each item."""
     enriched = []
     for item in items:
-        item["video_url"]     = make_presigned_url(item.get("s3_key"))
+        item["video_url"] = make_presigned_url(item.get("s3_key"))
         item["thumbnail_url"] = make_presigned_url(item.get("thumbnail_s3_key"))
         enriched.append(item)
     return enriched
@@ -102,7 +100,7 @@ def response(status_code: int, body: dict) -> dict:
         "statusCode": status_code,
         "headers": {
             "Content-Type": "application/json",
-            #"Access-Control-Allow-Origin": "*",
+            # "Access-Control-Allow-Origin": "*",
         },
         "body": json.dumps(body, default=decimal_to_python),
     }
@@ -111,9 +109,9 @@ def response(status_code: int, body: dict) -> dict:
 def lambda_handler(event: dict, context) -> dict:
     logger.info(f"Event: {json.dumps(event)}")
 
-    params     = event.get("queryStringParameters") or {}
-    date       = params.get("date")
-    camera_id  = params.get("camera")
+    params = event.get("queryStringParameters") or {}
+    date = params.get("date")
+    camera_id = params.get("camera")
 
     # Validate date
     if not date:
@@ -121,6 +119,7 @@ def lambda_handler(event: dict, context) -> dict:
 
     try:
         from datetime import datetime
+
         datetime.strptime(date, "%Y%m%d")
     except ValueError:
         return response(400, {"error": "date must be in YYYYMMDD format"})
@@ -135,11 +134,14 @@ def lambda_handler(event: dict, context) -> dict:
 
         items = enrich_with_urls(items)
 
-        return response(200, {
-            "date":   date,
-            "count":  len(items),
-            "clips":  items,
-        })
+        return response(
+            200,
+            {
+                "date": date,
+                "count": len(items),
+                "clips": items,
+            },
+        )
 
     except Exception as e:
         logger.error(f"Query failed: {e}", exc_info=True)
