@@ -141,7 +141,7 @@ async def download_clip(
             skipped = True
         elif action == "Downloading":
             progress = status.get("progress", 0)
-            total    = status.get("total", 0)
+            total = status.get("total", 0)
             if total > 0:
                 pct = min(int((progress / total) * 100), 100)
                 bar = ("█" * (pct // 5)).ljust(20)
@@ -245,10 +245,12 @@ async def poll_camera(
                         new_last_seen = clip["startTime"]
                 else:
                     logger.warning(
-                        f"  ⚠️  Upload failed — keeping local file for retry next run"
+                        "  ⚠️  Upload failed — keeping local file for retry next run"
                     )
             else:
-                logger.warning(f"  ⚠️  Download failed or skipped for clip at {clip['startTime']}")
+                logger.warning(
+                    f"  ⚠️  Download failed or skipped for clip at {clip['startTime']}"
+                )
 
     # Update state only if we made progress
     if new_last_seen > last_seen:
@@ -269,7 +271,9 @@ async def run_poll_cycle(config: dict, state: dict, s3_client) -> dict:
         try:
             state = await poll_camera(camera, config, state, s3_client, tmp_dir)
         except Exception as e:
-            logger.error(f"Unexpected error polling {camera['name']}: {e}", exc_info=True)
+            logger.error(
+                f"Unexpected error polling {camera['name']}: {e}", exc_info=True
+            )
 
     return state
 
@@ -310,3 +314,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    
