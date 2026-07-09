@@ -115,7 +115,9 @@ def generate_thumbnail(clip_path: str, thumbnail_path: str) -> bool:
         )
         if result.returncode != 0:
             # Clip may be shorter than 1s — retry from frame 0
-            logger.warning(f"ffmpeg at 1s failed, retrying from frame 0: {result.stderr}")
+            logger.warning(
+                f"ffmpeg at 1s failed, retrying from frame 0: {result.stderr}"
+            )
             cmd[2] = "0"
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
 
@@ -187,9 +189,9 @@ def cleanup(*paths: str) -> None:
 
 def process_record(record: dict) -> None:
     """Process a single S3 event record."""
-    bucket  = record["s3"]["bucket"]["name"]
-    s3_key  = record["s3"]["object"]["key"]
-    s3_key  = s3_key.replace("+", " ")   # S3 URL-encodes spaces as +
+    bucket = record["s3"]["bucket"]["name"]
+    s3_key = record["s3"]["object"]["key"]
+    s3_key = s3_key.replace("+", " ")   # S3 URL-encodes spaces as +
 
     logger.info(f"Processing: s3://{bucket}/{s3_key}")
 
@@ -200,10 +202,10 @@ def process_record(record: dict) -> None:
         logger.error(f"Skipping — could not parse key: {e}")
         return
 
-    clip_name      = parsed["filename"].replace(".mp4", "")
-    local_clip     = os.path.join(TMP_DIR, parsed["filename"])
-    local_thumb    = os.path.join(TMP_DIR, f"{clip_name}.jpg")
-    thumbnail_key  = f"{THUMBNAIL_PREFIX}/{parsed['camera_id']}/{parsed['date']}/{clip_name}.jpg"
+    clip_name = parsed["filename"].replace(".mp4", "")
+    local_clip = os.path.join(TMP_DIR, parsed["filename"])
+    local_thumb = os.path.join(TMP_DIR, f"{clip_name}.jpg")
+    thumbnail_key = f"{THUMBNAIL_PREFIX}/{parsed['camera_id']}/{parsed['date']}/{clip_name}.jpg"
 
     try:
         # 1. Download clip
