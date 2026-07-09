@@ -28,15 +28,15 @@ logger.setLevel(logging.INFO)
 s3 = boto3.client("s3")
 dynamodb = boto3.resource("dynamodb")
 
-TABLE_NAME       = os.environ["DYNAMODB_TABLE"]
-S3_BUCKET        = os.environ["S3_BUCKET"]
+TABLE_NAME = os.environ["DYNAMODB_TABLE"]
+S3_BUCKET = os.environ["S3_BUCKET"]
 THUMBNAIL_PREFIX = os.environ.get("THUMBNAIL_PREFIX", "thumbnails")
-TTL_DAYS         = int(os.environ.get("TTL_DAYS", "365"))
+TTL_DAYS = int(os.environ.get("TTL_DAYS", "365"))
 
 table = dynamodb.Table(TABLE_NAME)
 
-FFMPEG_PATH  = "/opt/bin/ffmpeg"   # provided by the Lambda layer
-TMP_DIR      = "/tmp"
+FFMPEG_PATH = "/opt/bin/ffmpeg"   # provided by the Lambda layer
+TMP_DIR = "/tmp"
 
 
 def parse_s3_key(s3_key: str) -> dict:
@@ -71,7 +71,7 @@ def parse_s3_key(s3_key: str) -> dict:
     dt = datetime.strptime(f"{date_str}{time_str}", "%Y%m%d%H%M%S")
     dt = dt.replace(tzinfo=timezone.utc)
     start_time = int(dt.timestamp())
-    end_time   = start_time + duration_s
+    end_time = start_time + duration_s
 
     return {
         "camera_id":  camera_id,
@@ -205,7 +205,9 @@ def process_record(record: dict) -> None:
     clip_name = parsed["filename"].replace(".mp4", "")
     local_clip = os.path.join(TMP_DIR, parsed["filename"])
     local_thumb = os.path.join(TMP_DIR, f"{clip_name}.jpg")
-    thumbnail_key = f"{THUMBNAIL_PREFIX}/{parsed['camera_id']}/{parsed['date']}/{clip_name}.jpg"
+    thumbnail_key = (
+        f"{THUMBNAIL_PREFIX}/{parsed['camera_id']}/{parsed['date']}/{clip_name}.jpg"
+    )
 
     try:
         # 1. Download clip
