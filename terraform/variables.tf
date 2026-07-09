@@ -6,6 +6,7 @@ variable "aws_region" {
 
 variable "bucket_name" {
   description = "Globally unique S3 bucket name for camera clips"
+  default     = "vladaya-tapo-cameras"   # your actual bucket name
   type        = string
 }
 
@@ -19,10 +20,4 @@ variable "poller_user_name" {
   description = "IAM user name for the local poller script (least-privilege upload access)"
   type        = string
   default     = "tapo-poller"
-}
-
-variable "bucket_name" {
-  description = "Globally unique S3 bucket name for camera clips"
-  type        = string
-  default     = "vladaya-tapo-cameras"   # your actual bucket name
 }

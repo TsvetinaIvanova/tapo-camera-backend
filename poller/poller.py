@@ -101,12 +101,12 @@ async def download_clip(
     Download a single clip. Returns local file path on success, None on failure.
     """
     start_time = clip["startTime"]
-    end_time   = clip["endTime"]
-    duration   = end_time - start_time
+    end_time = clip["endTime"]
+    duration = end_time - start_time
 
-    start_dt   = datetime.fromtimestamp(start_time, timezone.utc)
-    time_str   = start_dt.strftime("%H%M%S")
-    file_name  = f"{camera_name}_{time_str}_{duration}s.mp4"
+    start_dt = datetime.fromtimestamp(start_time, timezone.utc)
+    time_str = start_dt.strftime("%H%M%S")
+    file_name = f"{camera_name}_{time_str}_{duration}s.mp4"
     local_path = os.path.join(output_dir, file_name)
 
     if os.path.exists(local_path):
@@ -126,8 +126,8 @@ async def download_clip(
     )
 
     saw_converting = False
-    skipped        = False
-    interrupted    = False
+    skipped = False
+    interrupted = False
 
     async for status in downloader.download():
         action = status.get("currentAction", "")
@@ -173,11 +173,11 @@ async def poll_camera(
     s3_client,
     tmp_dir: str,
 ) -> dict:
-    name     = camera["name"]
-    ip       = camera["ip"]
-    user     = camera["user"]
+    name = camera["name"]
+    ip = camera["ip"]
+    user = camera["user"]
     password = camera["password"]
-    bucket   = config["aws"]["bucket"]
+    bucket = config["aws"]["bucket"]
 
     logger.info(f"📷  Polling {name} ({ip})")
 
@@ -196,8 +196,8 @@ async def poll_camera(
         return state
 
     # Determine date range to check — today + yesterday to catch midnight boundary
-    now       = datetime.now(timezone.utc)
-    dates     = [
+    now = datetime.now(timezone.utc)
+    dates = [
         (now - timedelta(days=1)).strftime("%Y%m%d"),
         now.strftime("%Y%m%d"),
     ]
@@ -245,7 +245,7 @@ async def poll_camera(
                         new_last_seen = clip["startTime"]
                 else:
                     logger.warning(
-                        "  ⚠️  Upload failed — keeping local file for retry next run"
+                        f"  ⚠️  Upload failed — keeping local file for retry next run"
                     )
             else:
                 logger.warning(f"  ⚠️  Download failed or skipped for clip at {clip['startTime']}")
@@ -275,9 +275,9 @@ async def run_poll_cycle(config: dict, state: dict, s3_client) -> dict:
 
 
 def main():
-    config     = load_config(args.config)
+    config = load_config(args.config)
     state_file = config["poller"]["state_file"]
-    interval   = config["poller"]["interval_seconds"]
+    interval = config["poller"]["interval_seconds"]
 
     s3_client = make_s3_client(
         config["aws"]["profile"],
