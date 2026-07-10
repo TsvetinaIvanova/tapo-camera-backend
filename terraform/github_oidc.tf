@@ -136,6 +136,7 @@ resource "aws_iam_role_policy" "github_actions_deploy" {
           "s3:PutBucketAcl",
           "s3:GetBucketCORS",
           "s3:PutBucketCORS",
+          "s3:GetAccelerateConfiguration",
           "s3:ListBucket",
           "s3:PutObject",
           "s3:GetObject",
