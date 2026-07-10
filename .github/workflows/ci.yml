@@ -101,7 +101,7 @@ jobs:
         working-directory: terraform
         id: plan
         run: |
-          terraform plan -no-color -out=tfplan 2>&1 | tee plan_output.txt
+          terraform plan -no-color -lock-timeout=5m -out=tfplan 2>&1 | tee plan_output.txt
           echo "exitcode=${PIPESTATUS[0]}" >> $GITHUB_OUTPUT
 
       # Post plan as a comment on PRs so you can review before merging
