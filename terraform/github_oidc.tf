@@ -81,6 +81,8 @@ resource "aws_iam_role_policy" "github_actions_deploy" {
         Sid    = "LambdaUpdate"
         Effect = "Allow"
         Action = [
+          "lambda:Get*",
+          "lambda:List*",
           "lambda:UpdateFunctionCode",
           "lambda:UpdateFunctionConfiguration",
           "lambda:GetFunction",
@@ -133,6 +135,8 @@ resource "aws_iam_role_policy" "github_actions_deploy" {
         Sid    = "S3BucketManage"
         Effect = "Allow"
         Action = [
+          "s3:Get*",
+          "s3:List*",
           "s3:CreateBucket",
           "s3:DeleteBucket",
           "s3:GetBucketPolicy",
@@ -149,7 +153,6 @@ resource "aws_iam_role_policy" "github_actions_deploy" {
           "s3:DeleteLifecycleConfiguration",
           "s3:GetBucketNotification",
           "s3:PutBucketNotification",
-          "s3:Get*",
           "s3:PutBucketWebsite",
           "s3:DeleteBucketWebsite",
           #"s3:GetBucketAcl",
@@ -183,6 +186,7 @@ resource "aws_iam_role_policy" "github_actions_deploy" {
         Sid    = "DynamoDBManage"
         Effect = "Allow"
         Action = [
+          "dynamodb:List*",
           "dynamodb:CreateTable",
           "dynamodb:DeleteTable",
           "dynamodb:DescribeTable",
