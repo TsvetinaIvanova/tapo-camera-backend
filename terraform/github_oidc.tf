@@ -81,6 +81,8 @@ resource "aws_iam_role_policy" "github_actions_deploy" {
         Sid    = "LambdaUpdate"
         Effect = "Allow"
         Action = [
+          "lambda:Get*",
+          "lambda:List*",
           "lambda:UpdateFunctionCode",
           "lambda:UpdateFunctionConfiguration",
           "lambda:GetFunction",
@@ -99,15 +101,33 @@ resource "aws_iam_role_policy" "github_actions_deploy" {
         Sid    = "IAMRead"
         Effect = "Allow"
         Action = [
+          # Roles
           "iam:GetRole",
           "iam:GetRolePolicy",
-          "iam:GetOpenIDConnectProvider",
-          "iam:GetPolicy",
-          "iam:GetPolicyVersion",
           "iam:ListRolePolicies",
           "iam:ListAttachedRolePolicies",
-          "iam:ListPolicies",
+          "iam:ListInstanceProfilesForRole",
           "iam:PassRole",
+          # Users
+          "iam:GetUser",
+          "iam:GetUserPolicy",
+          "iam:ListUserPolicies",
+          "iam:ListAttachedUserPolicies",
+          "iam:ListAccessKeys",
+          "iam:ListGroupsForUser",
+          # Policies
+          "iam:GetPolicy",
+          "iam:GetPolicyVersion",
+          "iam:ListPolicies",
+          "iam:ListPolicyVersions",
+          "iam:ListEntitiesForPolicy",
+          # OIDC
+          "iam:GetOpenIDConnectProvider",
+          "iam:ListOpenIDConnectProviders",
+          # Tags
+          "iam:ListRoleTags",
+          "iam:ListUserTags",
+          "iam:ListPolicyTags",
         ]
         Resource = "*"
       },
@@ -115,10 +135,13 @@ resource "aws_iam_role_policy" "github_actions_deploy" {
         Sid    = "S3BucketManage"
         Effect = "Allow"
         Action = [
+          "s3:Get*",
+          "s3:List*",
           "s3:CreateBucket",
           "s3:DeleteBucket",
           "s3:GetBucketPolicy",
           "s3:PutBucketPolicy",
+          "s3:DeleteBucketPolicy",
           "s3:GetBucketVersioning",
           "s3:PutBucketVersioning",
           "s3:GetBucketPublicAccessBlock",
@@ -127,19 +150,31 @@ resource "aws_iam_role_policy" "github_actions_deploy" {
           "s3:PutEncryptionConfiguration",
           "s3:GetLifecycleConfiguration",
           "s3:PutLifecycleConfiguration",
+          "s3:DeleteLifecycleConfiguration",
           "s3:GetBucketNotification",
           "s3:PutBucketNotification",
-          "s3:GetBucketWebsite",
           "s3:PutBucketWebsite",
           "s3:DeleteBucketWebsite",
-          "s3:GetBucketAcl",
+          #"s3:GetBucketAcl",
           "s3:PutBucketAcl",
-          "s3:GetBucketCORS",
+          #"s3:GetBucketCORS",
           "s3:PutBucketCORS",
-          "s3:GetAccelerateConfiguration",
+          #"s3:GetAccelerateConfiguration",
+          "s3:PutAccelerateConfiguration",
+          #"s3:GetBucketObjectLockConfiguration",
+          #"s3:GetBucketRequestPayment",
+          #"s3:GetBucketTagging",
+          "s3:PutBucketTagging",
+          #"s3:GetBucketLogging",
+          #"s3:GetBucketOwnershipControls",
+          "s3:PutBucketOwnershipControls",
+          #"s3:GetBucketReplicationConfiguration",
+          "s3:PutBucketReplicationConfiguration",
+          #"s3:GetBucketReplication",
+          "s3:PutBucketReplication",
           "s3:ListBucket",
           "s3:PutObject",
-          "s3:GetObject",
+          #"s3:GetObject",
           "s3:DeleteObject",
         ]
         Resource = [
@@ -151,6 +186,7 @@ resource "aws_iam_role_policy" "github_actions_deploy" {
         Sid    = "DynamoDBManage"
         Effect = "Allow"
         Action = [
+          "dynamodb:List*",
           "dynamodb:CreateTable",
           "dynamodb:DeleteTable",
           "dynamodb:DescribeTable",
