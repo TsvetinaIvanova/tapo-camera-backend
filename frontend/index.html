@@ -397,7 +397,14 @@
   const tabsBar    = document.getElementById("tabs-bar");
 
   datePicker.value = new Date().toISOString().slice(0, 10);
-  loadBtn.addEventListener("click", loadClips);
+
+  loadBtn.addEventListener("click", async () => {
+    if (!API_BASE) {
+      try { await loadConfig(); } catch { return; }
+    }
+    loadClips();
+  });
+
 
   // ── Load ───────────────────────────────────────────────
   async function loadClips() {
