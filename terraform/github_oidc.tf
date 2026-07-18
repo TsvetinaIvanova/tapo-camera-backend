@@ -84,6 +84,7 @@ resource "aws_iam_role_policy" "github_actions_deploy" {
           "s3:*",
           "dynamodb:*",
           "cloudwatch:*",
+          "apigateway:*",
           "lambda:*",
           "sns:*",
           "logs:*",
