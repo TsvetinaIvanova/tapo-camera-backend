@@ -1,0 +1,568 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Camera Clips</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:         #0f1117;
+    --bg-card:    #181b23;
+    --bg-input:   #1e2130;
+    --border:     #2a2e3d;
+    --accent:     #4f8ef7;
+    --accent-dim: rgba(79,142,247,0.12);
+    --text:       #e2e6f0;
+    --text-dim:   #7a82a0;
+    --text-tiny:  #4a5068;
+    --green:      #3ecf8e;
+    --amber:      #f59e0b;
+    --red:        #ef4444;
+    --radius:     8px;
+    --font:       -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --mono:       "SF Mono", "Fira Code", monospace;
+  }
+
+  body {
+    font-family: var(--font);
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+
+  /* ── Header ────────────────────────────────────────── */
+  header {
+    padding: 20px 24px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  header h1 { font-size: 16px; font-weight: 600; letter-spacing: -0.01em; }
+
+  header .dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--green);
+    box-shadow: 0 0 6px var(--green);
+  }
+
+  main { max-width: 900px; margin: 0 auto; padding: 24px; }
+
+  /* ── Controls ──────────────────────────────────────── */
+  .controls {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 24px;
+    flex-wrap: wrap;
+    align-items: flex-end;
+  }
+
+  .field { display: flex; flex-direction: column; gap: 6px; }
+
+  label {
+    font-size: 11px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: var(--text-dim);
+  }
+
+  input[type="date"] {
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--text);
+    padding: 8px 12px;
+    font-size: 14px;
+    font-family: var(--font);
+    outline: none;
+    cursor: pointer;
+    height: 36px;
+  }
+
+  input[type="date"]:focus { border-color: var(--accent); }
+
+  button.load-btn {
+    height: 36px;
+    padding: 0 16px;
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: var(--radius);
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    align-self: flex-end;
+    white-space: nowrap;
+  }
+
+  button.load-btn:hover { opacity: 0.9; }
+  button.load-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  /* ── Status ────────────────────────────────────────── */
+  .status {
+    font-size: 13px;
+    color: var(--text-dim);
+    margin-bottom: 20px;
+    min-height: 20px;
+  }
+
+  .status.error { color: var(--red); }
+
+  /* ── Tabs ──────────────────────────────────────────── */
+  .tabs-bar {
+    display: flex;
+    gap: 2px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 20px;
+    overflow-x: auto;
+  }
+
+  .tab-btn {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 8px 16px;
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: var(--text-dim);
+    font-size: 13px;
+    font-family: var(--mono);
+    font-weight: 500;
+    cursor: pointer;
+    white-space: nowrap;
+    margin-bottom: -1px;
+    transition: color 0.1s, border-color 0.1s;
+    height: auto;
+    border-radius: 0;
+  }
+
+  .tab-btn:hover { color: var(--text); }
+
+  .tab-btn.active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+  }
+
+  .tab-count {
+    font-size: 11px;
+    font-weight: 500;
+    padding: 1px 7px;
+    border-radius: 99px;
+    background: var(--bg-input);
+    color: var(--text-tiny);
+    border: 1px solid var(--border);
+    font-family: var(--font);
+  }
+
+  .tab-btn.active .tab-count {
+    background: var(--accent-dim);
+    color: var(--accent);
+    border-color: var(--accent-dim);
+  }
+
+  /* ── Clip list ─────────────────────────────────────── */
+  .clip-list { display: flex; flex-direction: column; gap: 2px; }
+
+  .clip-row {
+    display: grid;
+    grid-template-columns: 72px 1fr auto auto;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    border-radius: var(--radius);
+    border: 1px solid transparent;
+    cursor: pointer;
+    transition: background 0.1s, border-color 0.1s;
+  }
+
+  .clip-row:hover {
+    background: var(--bg-card);
+    border-color: var(--border);
+  }
+
+  .thumb {
+    width: 72px; height: 40px;
+    border-radius: 4px;
+    object-fit: cover;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    display: block;
+  }
+
+  .thumb-placeholder {
+    width: 72px; height: 40px;
+    border-radius: 4px;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-tiny);
+    font-size: 18px;
+  }
+
+  .clip-info { min-width: 0; }
+
+  .clip-time {
+    font-family: var(--mono);
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text);
+  }
+
+  .clip-meta { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
+
+  .status-badge {
+    font-size: 11px;
+    font-weight: 500;
+    padding: 3px 8px;
+    border-radius: 99px;
+    white-space: nowrap;
+  }
+
+  .badge-complete { background: rgba(62,207,142,0.12); color: var(--green); }
+  .badge-pending  { background: rgba(245,158,11,0.12); color: var(--amber); }
+  .badge-failed   { background: rgba(239,68,68,0.12);  color: var(--red); }
+  .badge-unknown  { background: var(--bg-input); color: var(--text-dim); }
+
+  .clip-download {
+    font-size: 12px;
+    color: var(--accent);
+    text-decoration: none;
+    white-space: nowrap;
+    padding: 4px 10px;
+    border: 1px solid var(--accent-dim);
+    border-radius: var(--radius);
+  }
+
+  .clip-download:hover { background: var(--accent-dim); }
+
+  /* ── Empty / loading ───────────────────────────────── */
+  .empty {
+    text-align: center;
+    padding: 60px 24px;
+    color: var(--text-dim);
+  }
+
+  .empty p { margin-top: 8px; font-size: 13px; }
+
+  .spinner {
+    display: inline-block;
+    width: 16px; height: 16px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.6s linear infinite;
+    vertical-align: middle;
+    margin-right: 6px;
+  }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ── Modal ─────────────────────────────────────────── */
+  .modal-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.85);
+    z-index: 100;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .modal-overlay.open { display: flex; }
+
+  .modal {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    width: min(640px, 95vw);
+    overflow: hidden;
+  }
+
+  .modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .modal-header h3 {
+    font-size: 14px;
+    font-weight: 600;
+    font-family: var(--mono);
+  }
+
+  .modal-close {
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    font-size: 20px;
+    cursor: pointer;
+    padding: 0 4px;
+    height: auto;
+    line-height: 1;
+  }
+
+  .modal-close:hover { color: var(--text); }
+
+  video { width: 100%; display: block; background: #000; }
+
+  .modal-meta {
+    padding: 12px 16px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    font-size: 12px;
+    color: var(--text-dim);
+  }
+
+  .modal-meta strong { color: var(--text); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="dot"></div>
+  <h1>Camera Clips</h1>
+</header>
+
+<main>
+  <div class="controls">
+    <div class="field">
+      <label>Date</label>
+      <input type="date" id="date-picker">
+    </div>
+    <button class="load-btn" id="load-btn">Load clips</button>
+  </div>
+
+  <div class="status" id="status"></div>
+
+  <div class="tabs-bar" id="tabs-bar" style="display:none"></div>
+  <div id="results"></div>
+</main>
+
+<!-- Video modal -->
+<div class="modal-overlay" id="modal" onclick="closeModal(event)">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 id="modal-title">—</h3>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <video id="modal-video" controls autoplay></video>
+    <div class="modal-meta" id="modal-meta"></div>
+  </div>
+</div>
+
+<script>
+  // ── Config — loaded at runtime from config.json ─────────
+  // config.json is generated by the CI/CD pipeline and uploaded
+  // to S3 alongside index.html. It is never committed to the repo.
+  // For local development, create frontend/config.json with:
+  // { "apiBase": "https://your-api-id.execute-api.eu-central-1.amazonaws.com" }
+  let API_BASE = "";
+
+  async function loadConfig() {
+    try {
+      const res = await fetch("config.json");
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const cfg = await res.json();
+      API_BASE = cfg.apiBase;
+    } catch (err) {
+      setStatus("Failed to load config — is config.json deployed?", "error");
+      throw err;
+    }
+  }
+
+
+  // ── State ──────────────────────────────────────────────
+  let clipsData   = [];
+  let activeTab   = "all";
+  let cameras     = [];
+
+  // ── Init ───────────────────────────────────────────────
+  const datePicker = document.getElementById("date-picker");
+  const loadBtn    = document.getElementById("load-btn");
+  const statusEl   = document.getElementById("status");
+  const resultsEl  = document.getElementById("results");
+  const tabsBar    = document.getElementById("tabs-bar");
+
+  datePicker.value = new Date().toISOString().slice(0, 10);
+  loadBtn.addEventListener("click", loadClips);
+
+  // ── Load ───────────────────────────────────────────────
+  async function loadClips() {
+    const date = datePicker.value.replace(/-/g, "");
+    if (!date) { setStatus("Please select a date.", "error"); return; }
+
+    setStatus('<span class="spinner"></span> Loading…');
+    loadBtn.disabled = true;
+    resultsEl.innerHTML = "";
+    tabsBar.style.display = "none";
+
+    try {
+      const res  = await fetch(`${API_BASE}/clips?date=${date}`);
+      const data = await res.json();
+
+      if (!res.ok) { setStatus(`Error: ${data.error || res.statusText}`, "error"); return; }
+
+      clipsData = data.clips || [];
+      cameras   = [...new Set(clipsData.map(c => c.camera_id).filter(Boolean))].sort();
+      activeTab = cameras.length === 1 ? cameras[0] : "all";
+
+      setStatus(`${clipsData.length} clip${clipsData.length !== 1 ? "s" : ""} on ${formatDate(date)}`);
+      renderTabs();
+      renderClips();
+
+    } catch (err) {
+      setStatus(`Failed to reach API: ${err.message}`, "error");
+    } finally {
+      loadBtn.disabled = false;
+    }
+  }
+
+  // ── Tabs ───────────────────────────────────────────────
+  function renderTabs() {
+    if (cameras.length === 0) { tabsBar.style.display = "none"; return; }
+    tabsBar.style.display = "flex";
+
+    const tabs = cameras.length > 1
+      ? [{ id: "all", label: "All cameras", count: clipsData.length }, ...cameras.map(c => ({
+          id: c, label: c, count: clipsData.filter(cl => cl.camera_id === c).length
+        }))]
+      : [{ id: cameras[0], label: cameras[0], count: clipsData.length }];
+
+    tabsBar.innerHTML = tabs.map(t => `
+      <button class="tab-btn ${t.id === activeTab ? "active" : ""}"
+              onclick="switchTab('${t.id}')">
+        ${t.label}
+        <span class="tab-count">${t.count}</span>
+      </button>
+    `).join("");
+  }
+
+  function switchTab(tabId) {
+    activeTab = tabId;
+    // Update active state without re-fetching
+    document.querySelectorAll(".tab-btn").forEach(btn => {
+      btn.classList.toggle("active", btn.textContent.trim().startsWith(
+        tabId === "all" ? "All" : tabId
+      ));
+    });
+    renderClips();
+  }
+
+  // ── Render clips ───────────────────────────────────────
+  function renderClips() {
+    const visible = activeTab === "all"
+      ? clipsData
+      : clipsData.filter(c => c.camera_id === activeTab);
+
+    if (visible.length === 0) {
+      resultsEl.innerHTML = `
+        <div class="empty">
+          <div style="font-size:32px">📭</div>
+          <p>No clips found for this date${activeTab !== "all" ? " and camera" : ""}.</p>
+        </div>`;
+      return;
+    }
+
+    resultsEl.innerHTML = `<div class="clip-list">${visible.map(clipRow).join("")}</div>`;
+  }
+
+  function clipRow(clip) {
+    const startDt  = new Date(clip.start_time * 1000);
+    const timeStr  = startDt.toTimeString().slice(0, 8);
+    const duration = clip.duration_s ? `${clip.duration_s}s` : "—";
+    const fileSize = clip.file_size_bytes ? formatBytes(clip.file_size_bytes) : "";
+    const status   = clip.processing_status || "unknown";
+    const badgeCls = { complete: "badge-complete", pending: "badge-pending",
+                       failed: "badge-failed" }[status] || "badge-unknown";
+    const thumb    = clip.thumbnail_url;
+    const video    = clip.video_url;
+
+    // Show camera name in meta only on the "All" tab
+    const camMeta  = activeTab === "all"
+      ? `<span style="font-family:var(--mono);color:var(--accent);font-size:11px">${clip.camera_id}</span> · `
+      : "";
+
+    return `
+      <div class="clip-row" onclick='openModal(${JSON.stringify(clip)})'>
+        ${thumb
+          ? `<img class="thumb" src="${thumb}" alt="thumbnail" loading="lazy">`
+          : `<div class="thumb-placeholder">🎥</div>`
+        }
+        <div class="clip-info">
+          <div class="clip-time">${timeStr} UTC</div>
+          <div class="clip-meta">${camMeta}${duration}${fileSize ? " · " + fileSize : ""}</div>
+        </div>
+        <span class="status-badge ${badgeCls}">${status}</span>
+        ${video
+          ? `<a class="clip-download" href="${video}" download onclick="event.stopPropagation()">↓ Download</a>`
+          : `<span style="width:80px"></span>`
+        }
+      </div>`;
+  }
+
+  // ── Modal ──────────────────────────────────────────────
+  function openModal(clip) {
+    const modal = document.getElementById("modal");
+    const video = document.getElementById("modal-video");
+    const title = document.getElementById("modal-title");
+    const meta  = document.getElementById("modal-meta");
+    const dt    = new Date(clip.start_time * 1000);
+
+    title.textContent = `${clip.camera_id} · ${dt.toTimeString().slice(0, 8)} UTC`;
+
+    if (clip.video_url) { video.src = clip.video_url; video.style.display = "block"; }
+    else                { video.style.display = "none"; }
+
+    meta.innerHTML = [
+      clip.duration_s      ? `<span><strong>Duration</strong> ${clip.duration_s}s</span>` : "",
+      clip.file_size_bytes ? `<span><strong>Size</strong> ${formatBytes(clip.file_size_bytes)}</span>` : "",
+      clip.processing_status ? `<span><strong>Status</strong> ${clip.processing_status}</span>` : "",
+      clip.has_person      ? `<span><strong>Person detected</strong> ${clip.has_person}</span>` : "",
+      clip.vedio_type      ? `<span><strong>Event type</strong> ${clip.vedio_type}</span>` : "",
+    ].filter(Boolean).join("");
+
+    modal.classList.add("open");
+  }
+
+  function closeModal(event) {
+    if (event && event.target !== document.getElementById("modal")) return;
+    const modal = document.getElementById("modal");
+    const video = document.getElementById("modal-video");
+    modal.classList.remove("open");
+    video.pause();
+    video.src = "";
+  }
+
+  document.addEventListener("keydown", e => { if (e.key === "Escape") closeModal(); });
+
+  // ── Helpers ────────────────────────────────────────────
+  function setStatus(msg, type = "") {
+    statusEl.innerHTML = msg;
+    statusEl.className = "status" + (type ? " " + type : "");
+  }
+
+  function formatDate(yyyymmdd) {
+    const d = new Date(yyyymmdd.slice(0,4), yyyymmdd.slice(4,6) - 1, yyyymmdd.slice(6,8));
+    return d.toLocaleDateString("en-GB", { day:"numeric", month:"long", year:"numeric" });
+  }
+
+  function formatBytes(bytes) {
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+    return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  }
+</script>
+</body>
+</html>

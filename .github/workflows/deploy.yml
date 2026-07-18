@@ -129,8 +129,20 @@ jobs:
 
       - name: Deploy frontend to S3
         run: |
+          API_ENDPOINT=$(cd terraform && terraform output -raw api_endpoint)
+
+          # Generate config.json
+          echo "{\"apiBase\": \"${API_ENDPOINT}\"}" > /tmp/config.json
+
+          # Upload both files
+          aws s3 cp /tmp/config.json \
+            s3://${{ needs.terraform.outputs.frontend_bucket }}/config.json \
+            --content-type "application/json" \
+            --cache-control "no-cache"
+
           aws s3 cp frontend/index.html \
             s3://${{ needs.terraform.outputs.frontend_bucket }}/index.html \
             --content-type "text/html" \
             --cache-control "no-cache"
+
           echo "✅ Frontend deployed"

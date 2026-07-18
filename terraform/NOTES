@@ -11,18 +11,6 @@ Separate poller from uploader?
 
 Make TTL a variable, so it can be synced between S3 and DynamoDB
 
-# Note 5
-
-Resolve issues during download and conversion
-
-  ⬇  [                    ] 0% c325_back_110842_24s.mp4
-could not convert string to float: b'N/A\n'
-Warning: Could not calculate length from stream.
-
-# NOTE 6
-
-Fix CORS error in API Gateway
-
 # NOTE 7
 
 Organize Terraform files into subdirectories by feature (e.g. lambda, api, s3, dynamodb, etc.) 
@@ -33,10 +21,6 @@ WHAT IS THIS? ===> and use `terraform init -from-module` to reference them from 
 
 See what keeps recreating the lambda/query directory on every `terraform apply` (even when nothing has changed). It seems to be related to the `archive_file` data source, but I don't know why.
 
-# NOTE 9
-
-Create the systemd service for the poller, so it can be started automatically on boot and restarted if it crashes.
-
 # NOTE 10
 
 See if config or .env is better for storing the poller configuration. The config.yaml file is currently ignored by git, but .env is not. The .env file is also easier to read and edit, but the config.yaml file is more structured and can be validated.
@@ -44,3 +28,11 @@ See if config or .env is better for storing the poller configuration. The config
 # NOTE 11
 
 Protect access to the API Gateway with an API key, so that only authorized clients can access it. This can be done by creating an API key in the API Gateway console and then adding it to the request headers of the client.
+
+# NOTE 12
+
+Automate frontend updates.
+
+# NOTE 14
+
+Review GitHub actions OIDC role permissions
