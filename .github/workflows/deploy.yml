@@ -23,6 +23,7 @@ jobs:
       processor_function: ${{ steps.tf-output.outputs.processor_function }}
       query_function: ${{ steps.tf-output.outputs.query_function }}
       frontend_bucket: ${{ steps.tf-output.outputs.frontend_bucket }}
+      api_endpoint: ${{ steps.tf-output.outputs.api_endpoint }}
 
     steps:
       - uses: actions/checkout@v6
@@ -54,6 +55,7 @@ jobs:
           echo "processor_function=$(terraform output -raw lambda_function_name)" >> $GITHUB_OUTPUT
           echo "query_function=$(terraform output -raw lambda_function_name_query 2>/dev/null || echo 'tapo-clip-query')" >> $GITHUB_OUTPUT
           echo "frontend_bucket=$(terraform output -raw frontend_bucket)" >> $GITHUB_OUTPUT
+          echo "api_endpoint=$(terraform output -raw api_endpoint)" >> $GITHUB_OUTPUT
 
   # ── Deploy Lambda code ──────────────────────────────────
   # Runs after Terraform so infrastructure is guaranteed to exist first.
@@ -129,7 +131,7 @@ jobs:
 
       - name: Deploy frontend to S3
         run: |
-          API_ENDPOINT=$(cd terraform && terraform output -raw api_endpoint)
+          API_ENDPOINT="${{ needs.terraform.outputs.api_endpoint }}"
 
           # Generate config.json
           echo "{\"apiBase\": \"${API_ENDPOINT}\"}" > /tmp/config.json
