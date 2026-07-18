@@ -3,6 +3,8 @@ name: Deploy
 on:
   push:
     branches: ["main"]
+  pull_request:
+    branches: ["main"]  
 
 env:
   PYTHON_VERSION: "3.12"
@@ -56,6 +58,22 @@ jobs:
           echo "query_function=$(terraform output -raw lambda_function_name_query 2>/dev/null || echo 'tapo-clip-query')" >> $GITHUB_OUTPUT
           echo "frontend_bucket=$(terraform output -raw frontend_bucket)" >> $GITHUB_OUTPUT
           echo "api_endpoint=$(terraform output -raw api_endpoint)" >> $GITHUB_OUTPUT
+
+      - name: Release state lock on failure
+        if: failure() || cancelled()
+        working-directory: terraform
+        run: |
+          LOCK_ID=$(aws dynamodb get-item \
+            --table-name tapo-tf-state-lock \
+            --key '{"LockID": {"S": "vladaya-tapo-tf-state/tapo-camera-backend/terraform.tfstate"}}' \
+            --query 'Item.Info.S' \
+            --output text 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['ID'])" 2>/dev/null || echo "")
+          if [ -n "$LOCK_ID" ]; then
+            terraform force-unlock -force "$LOCK_ID"
+            echo "✅ State lock released"
+          else
+            echo "ℹ️  No lock found to release"
+          fi
 
   # ── Deploy Lambda code ──────────────────────────────────
   # Runs after Terraform so infrastructure is guaranteed to exist first.
