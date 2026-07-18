@@ -46,6 +46,8 @@ jobs:
 
       - name: Terraform apply
         working-directory: terraform
+        env:
+          TF_VAR_alert_email: ${{ secrets.TF_ALERT_EMAIL }}
         run: terraform apply -auto-approve
 
       - name: Capture Terraform outputs

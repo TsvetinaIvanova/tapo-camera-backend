@@ -100,6 +100,8 @@ jobs:
       - name: Terraform plan
         working-directory: terraform
         id: plan
+        env:
+          TF_VAR_alert_email: ${{ secrets.TF_ALERT_EMAIL }}
         run: |
           terraform plan -no-color -lock-timeout=5m -out=tfplan 2>&1 | tee plan_output.txt
           echo "exitcode=${PIPESTATUS[0]}" >> $GITHUB_OUTPUT
