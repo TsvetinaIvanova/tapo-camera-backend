@@ -320,7 +320,9 @@ async def poll_camera(
                 None, tapo.getRecordings, date
             )
         except Exception as e:
-            logger.error(f"  ❌  [{name}] Could not get recordings on {date}: {e}")
+            logger.error(
+                f"  ❌  [{name}] Could not get recordings on {date}: {e}"
+                )
             if cloudwatch_client:
                 emit_metric(cloudwatch_client, "PollCycleErrors", name)
             continue
@@ -348,9 +350,10 @@ async def poll_camera(
 
                 if success:
                     os.remove(local_path)
-                    logger.info(f"  🗑️  [{name}] Deleted local: {os.path.basename(local_path)}")
-                    if clip["startTime"] > new_last_seen:
-                        new_last_seen = clip["startTime"]
+                    logger.info(
+                        f"  🗑️  [{name}] Deleted local: {os.path.basename(local_path)}"
+                    )
+                    new_last_seen = max(new_last_seen, clip["startTime"])
                     # Persist immediately — don't wait for the whole cycle
                     # to finish. If the process is killed right after this
                     # line, we've lost nothing: this clip is already safely
@@ -419,7 +422,9 @@ def camera_worker(
                 )
             )
         except Exception as e:
-            logger.error(f"  ❌  [{name}] Unexpected error in poll cycle: {e}", exc_info=True)
+            logger.exception(
+                f"  ❌  [{name}] Unexpected error in poll cycle: {e}"
+            )
             if cloudwatch_client:
                 emit_metric(cloudwatch_client, "PollCycleErrors", name)
             updated_state = state
@@ -482,7 +487,9 @@ def main():
         )
         t.start()
         threads.append(t)
-        logger.info(f"   Started thread for {camera['name']} (startup delay {i * STARTUP_STAGGER_SECONDS}s)")
+        logger.info(
+            f"   Started thread for {camera['name']} (startup delay {i * STARTUP_STAGGER_SECONDS}s)"
+        )
 
     try:
         # Main thread just idles — the daemon worker threads do the work.
