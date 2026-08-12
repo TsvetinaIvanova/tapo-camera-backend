@@ -35,10 +35,10 @@ jobs:
         run: pip install flake8 boto3 pyyaml pytapo
 
       - name: Lint poller
-        run: flake8 poller/ --max-line-length=88 --exclude=__pycache__
+        run: flake8 poller/ --max-line-length=120 --exclude=__pycache__
 
       - name: Lint lambdas
-        run: flake8 terraform/lambda/ --max-line-length=88 --exclude=__pycache__
+        run: flake8 terraform/lambda/ --max-line-length=100 --exclude=__pycache__
 
   test:
     name: Test

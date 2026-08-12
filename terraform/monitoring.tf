@@ -74,6 +74,72 @@ resource "aws_cloudwatch_metric_alarm" "lambda_errors" {
   ok_actions    = [aws_sns_topic.alerts.arn]
 }
 
+# ── Poller heartbeat + error alarms ────────────────────────
+# These come directly from the poller (via boto3 put_metric_data), not
+# from downstream log lines — so they detect the poller itself being
+# dead/hung or erroring, independent of whether any camera actually
+# saw motion. Complements the existing ClipsProcessed alarm, which
+# can't distinguish "poller down" from "quiet night, no clips."
+
+locals {
+  # Keep this in sync with the "name" fields in poller/config.yaml.
+  tapo_camera_names = [
+    "c225_garage",
+    "c325_back",
+    "c325_porch",
+    "c660_street",
+  ]
+}
+
+# Fires if a given camera's poller thread stops reporting entirely —
+# process crashed, thread hung, systemd service down, etc.
+resource "aws_cloudwatch_metric_alarm" "poller_heartbeat" {
+  for_each = toset(local.tapo_camera_names)
+
+  alarm_name          = "tapo-poller-heartbeat-${each.value}"
+  alarm_description   = "No poll cycle reported for ${each.value} in 30 minutes — poller thread may be dead or hung"
+  namespace           = "Tapo/Camera"
+  metric_name         = "PollCycleCompleted"
+  dimensions = {
+    CameraName = each.value
+  }
+  statistic           = "Sum"
+  period              = 1800   # 30 minutes — a few missed cycles even
+                                # on the slowest (night_mode) interval
+  evaluation_periods  = 1
+  threshold           = 1
+  comparison_operator = "LessThanThreshold"
+  treat_missing_data  = "breaching"   # no data = the thread stopped reporting = alarm
+
+  alarm_actions = [aws_sns_topic.alerts.arn]
+  ok_actions    = [aws_sns_topic.alerts.arn]
+}
+
+# Fires if a camera's poll cycles are running but erroring — connection
+# failures, auth failures, download failures — even if zero clips would
+# have been expected anyway. This is the case that ClipsProcessed alone
+# can't catch: the poller runs, logs errors, uploads nothing.
+resource "aws_cloudwatch_metric_alarm" "poller_errors" {
+  for_each = toset(local.tapo_camera_names)
+
+  alarm_name          = "tapo-poller-errors-${each.value}"
+  alarm_description   = "${each.value} poller is reporting errors — connection, auth, or download failures"
+  namespace           = "Tapo/Camera"
+  metric_name         = "PollCycleErrors"
+  dimensions = {
+    CameraName = each.value
+  }
+  statistic           = "Sum"
+  period              = 1800
+  evaluation_periods  = 1
+  threshold           = 1
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  treat_missing_data  = "notBreaching"  # no errors reported = healthy, not alarming
+
+  alarm_actions = [aws_sns_topic.alerts.arn]
+  ok_actions    = [aws_sns_topic.alerts.arn]
+}
+
 # ── Outputs ───────────────────────────────────────────────
 output "sns_topic_arn" {
   description = "SNS topic ARN for camera alerts"

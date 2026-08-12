@@ -33,6 +33,19 @@ resource "aws_iam_policy" "poller_upload" {
             "s3:prefix" = "clips/*"
           }
         }
+      },
+      {
+        Sid    = "AllowPutMetricDataForPollerMetrics"
+        Effect = "Allow"
+        Action = [
+          "cloudwatch:PutMetricData"
+        ]
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "cloudwatch:namespace" = "Tapo/Camera"
+          }
+        }
       }
     ]
   })
