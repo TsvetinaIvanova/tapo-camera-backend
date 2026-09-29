@@ -322,7 +322,7 @@ async def poll_camera(
         except Exception as e:
             logger.error(
                 f"  ❌  [{name}] Could not get recordings on {date}: {e}"
-                )
+            )
             if cloudwatch_client:
                 emit_metric(cloudwatch_client, "PollCycleErrors", name)
             continue
@@ -352,7 +352,7 @@ async def poll_camera(
                     os.remove(local_path)
                     logger.info(
                         f"  🗑️  [{name}] Deleted local: {os.path.basename(local_path)}"
-                    )
+                        )
                     new_last_seen = max(new_last_seen, clip["startTime"])
                     # Persist immediately — don't wait for the whole cycle
                     # to finish. If the process is killed right after this
@@ -404,47 +404,57 @@ def camera_worker(
     if startup_delay > 0:
         time.sleep(startup_delay)
 
-    while True:
-        with state_lock:
-            state = load_state(state_file)
+    # One event loop per thread, for the thread's entire lifetime — not
+    # recreated every cycle. pytapo's media-stream download uses async
+    # generators internally (e.g. HttpMediaSession.transceive) that
+    # aren't always finalized the instant our coroutine returns; Python
+    # closes them via garbage collection at a time of its own choosing,
+    # scheduled onto this loop. Destroying the loop every 15 minutes
+    # could kill that finalizer mid-flight ("Task was destroyed but it
+    # is pending"). Keeping the loop alive across cycles means any
+    # deferred cleanup from cycle N just runs at the start of cycle
+    # N+1's run_until_complete() instead of being cut off.
+    loop = asyncio.new_event_loop()
 
-        # Each thread gets its own event loop — required since Tapo()
-        # and the Downloader are constructed/awaited within it, and
-        # asyncio loops aren't shared safely across threads.
-        loop = asyncio.new_event_loop()
-        try:
-            updated_state = loop.run_until_complete(
-                poll_camera(
-                    camera, config, state, s3_client, tmp_dir,
-                    cloudwatch_client=cloudwatch_client,
-                    state_lock=state_lock,
-                    state_file=state_file,
+    try:
+        while True:
+            with state_lock:
+                state = load_state(state_file)
+
+            try:
+                updated_state = loop.run_until_complete(
+                    poll_camera(
+                        camera, config, state, s3_client, tmp_dir,
+                        cloudwatch_client=cloudwatch_client,
+                        state_lock=state_lock,
+                        state_file=state_file,
+                    )
                 )
-            )
-        except Exception as e:
-            logger.exception(
-                f"  ❌  [{name}] Unexpected error in poll cycle: {e}"
-            )
-            if cloudwatch_client:
-                emit_metric(cloudwatch_client, "PollCycleErrors", name)
-            updated_state = state
-        finally:
-            loop.close()
+            except Exception as e:
+                logger.error(
+                    f"  ❌  [{name}] Unexpected error in poll cycle: {e}", exc_info=True)
+                if cloudwatch_client:
+                    emit_metric(cloudwatch_client, "PollCycleErrors", name)
+                updated_state = state
 
-        # Belt-and-suspenders final sync — poll_camera already persists
-        # progress incrementally after every clip via persist_clip_progress,
-        # so this is normally a no-op write of values already on disk.
-        # It stays as a safety net for the (rare) case a whole cycle
-        # completes with in-memory state ahead of what got persisted.
-        with state_lock:
-            full_state = load_state(state_file)
+            # Belt-and-suspenders final sync — poll_camera already persists
+            # progress incrementally after every clip via persist_clip_progress,
+            # so this is normally a no-op write of values already on disk.
+            # It stays as a safety net for the (rare) case a whole cycle
+            # completes with in-memory state ahead of what got persisted.
+            with state_lock:
+                full_state = load_state(state_file)
             if name in updated_state:
                 full_state[name] = updated_state[name]
             save_state(state_file, full_state)
 
-        interval = get_camera_interval(camera, config)
-        logger.info(f"💤  [{name}] sleeping {interval}s until next poll...")
-        time.sleep(interval)
+            interval = get_camera_interval(camera, config)
+            logger.info(f"💤  [{name}] sleeping {interval}s until next poll...")
+            time.sleep(interval)
+    finally:
+        # Only reached if the while loop is ever broken out of (it isn't,
+        # currently — this is a safety net, not a normal code path).
+        loop.close()
 
 
 # ── Main ──────────────────────────────────────────────────

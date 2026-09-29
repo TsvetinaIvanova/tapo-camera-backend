@@ -1,0 +1,27 @@
+# TODO - trasform this into a setup script for the raspberry
+pip install pyyaml --break-system-packages
+pip install pytapo
+pip install aiofiles
+pip install boto3
+
+
+
+
+
+
+### Start service
+# Install PyYAML if not already present
+pip install pyyaml --break-system-packages
+
+# Copy and fill in config
+cp config.yaml.example config.yaml
+# edit config.yaml with your camera IPs and passwords
+
+# Install systemd service
+sudo cp tapo-poller.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable tapo-poller    # start on boot
+sudo systemctl start tapo-poller     # start now
+
+# Watch the logs
+journalctl -u tapo-poller -f
