@@ -88,6 +88,7 @@ resource "aws_iam_role_policy" "github_actions_deploy" {
           "lambda:*",
           "sns:*",
           "logs:*",
+          "ssm:GetParameter",
           "iam:Get*",
           "iam:List*",
           "iam:PassRole",
