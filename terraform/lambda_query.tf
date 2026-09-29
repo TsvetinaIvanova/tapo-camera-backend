@@ -40,7 +40,7 @@ resource "aws_apigatewayv2_api" "tapo" {
   cors_configuration {
     allow_origins = ["*"]   # tighten this to your S3 website URL once deployed
     allow_methods = ["GET", "OPTIONS"]
-    allow_headers = ["Content-Type"]
+    allow_headers = ["Content-Type", "x-api-key"]
     max_age       = 300
   }
 }
@@ -62,6 +62,9 @@ resource "aws_apigatewayv2_route" "get_clips" {
   api_id    = aws_apigatewayv2_api.tapo.id
   route_key = "GET /clips"
   target    = "integrations/${aws_apigatewayv2_integration.clip_query.id}"
+
+  authorization_type = "CUSTOM"
+  authorizer_id      = aws_apigatewayv2_authorizer.shared_secret.id
 }
 
 resource "aws_lambda_permission" "allow_apigw" {
