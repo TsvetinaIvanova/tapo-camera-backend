@@ -73,6 +73,7 @@ def setup_cloudwatch_logging(profile: str, region: str, log_group: str) -> None:
     except Exception as e:
         logger.warning(f"⚠️  Could not enable CloudWatch log shipping: {e}")
 
+
 # ── CLI ───────────────────────────────────────────────────
 parser = argparse.ArgumentParser(description="Tapo camera clip poller")
 parser.add_argument(
