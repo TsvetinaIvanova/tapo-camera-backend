@@ -16,6 +16,7 @@ __pycache__/
 # Other
 poller/get_videos.py
 poller/tapo-poller.service
+poller/REQUIRED_SETUP.md
 tapo_project_status.md
 frontend/config.json
 NOTES.md
