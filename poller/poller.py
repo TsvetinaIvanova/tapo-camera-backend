@@ -19,6 +19,7 @@ import asyncio
 import json
 import logging
 import os
+import socket
 import threading
 import time
 from datetime import datetime, timezone, timedelta
@@ -37,6 +38,41 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 logger = logging.getLogger("tapo-poller")
+
+
+def setup_cloudwatch_logging(profile: str, region: str, log_group: str) -> None:
+    """
+    Mirror all log output — this module's, plus library loggers like
+    asyncio's (e.g. the "Task was destroyed" warnings) — to a CloudWatch
+    Logs group, in addition to the existing journal/stdout output.
+
+    Attached to the root logger (not just "tapo-poller") so it's
+    inclusive of everything running in this process.
+
+    Best-effort: if this fails at startup (no network yet, package not
+    installed, bad IAM perms), log a warning and keep running without
+    it rather than refusing to start the poller over a logging feature.
+    """
+    try:
+        import watchtower
+
+        session = boto3.Session(profile_name=profile, region_name=region)
+        handler = watchtower.CloudWatchLogHandler(
+            boto3_client=session.client("logs"),
+            log_group_name=log_group,
+            log_stream_name=socket.gethostname(),
+            create_log_group=True,
+            send_interval=10,   # batch and flush at most every 10s
+        )
+        handler.setFormatter(logging.Formatter(
+            "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        ))
+        logging.getLogger().addHandler(handler)
+        logger.info(f"☁️  CloudWatch log shipping enabled (group: {log_group})")
+    except Exception as e:
+        logger.warning(f"⚠️  Could not enable CloudWatch log shipping: {e}")
+
 
 # ── CLI ───────────────────────────────────────────────────
 parser = argparse.ArgumentParser(description="Tapo camera clip poller")
@@ -432,7 +468,8 @@ def camera_worker(
                 )
             except Exception as e:
                 logger.error(
-                    f"  ❌  [{name}] Unexpected error in poll cycle: {e}", exc_info=True)
+                    f"  ❌  [{name}] Unexpected error in poll cycle: {e}", exc_info=True
+                    )
                 if cloudwatch_client:
                     emit_metric(cloudwatch_client, "PollCycleErrors", name)
                 updated_state = state
@@ -461,6 +498,12 @@ def camera_worker(
 def main():
     config = load_config(args.config)
     state_file = config["poller"]["state_file"]
+
+    setup_cloudwatch_logging(
+        config["aws"]["profile"],
+        config["aws"]["region"],
+        config.get("poller", {}).get("cloudwatch_log_group", "tapo-poller"),
+    )
 
     s3_client = make_s3_client(
         config["aws"]["profile"],
@@ -497,9 +540,7 @@ def main():
         )
         t.start()
         threads.append(t)
-        logger.info(
-            f"   Started thread for {camera['name']} (startup delay {i * STARTUP_STAGGER_SECONDS}s)"
-        )
+        logger.info(f"   Started thread for {camera['name']} (startup delay {i * STARTUP_STAGGER_SECONDS}s)")
 
     try:
         # Main thread just idles — the daemon worker threads do the work.
