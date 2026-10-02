@@ -6,7 +6,7 @@ on:
 
 env:
   PYTHON_VERSION: "3.12"
-  TF_VERSION: "1.9.0"
+  TF_VERSION: "1.15.8"
   AWS_REGION: eu-central-1
 
 jobs:

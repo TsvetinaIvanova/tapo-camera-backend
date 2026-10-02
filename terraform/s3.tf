@@ -46,12 +46,12 @@ resource "aws_s3_bucket_lifecycle_configuration" "camera_clips" {
     }
 
     transition {
-      days          = 90
+      days          = 60
       storage_class = "GLACIER"
     }
 
     expiration {
-      days = 365
+      days = var.clips_ttl_days
     }
 
     noncurrent_version_expiration {
