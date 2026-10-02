@@ -56,6 +56,36 @@ resource "aws_iam_user_policy_attachment" "poller_upload" {
   policy_arn = aws_iam_policy.poller_upload.arn
 }
 
+# ── Poller CloudWatch Logs permission ──────────────────────
+# Scoped to only the tapo-poller log group — same least-privilege
+# pattern as the PutObject-only S3 policy already on this user.
+#
+# NOTE: assumes your existing IAM user resource is named
+# `aws_iam_user.poller` in iam.tf — adjust the reference below if
+# it's actually named something else there.
+
+resource "aws_iam_policy" "poller_logs" {
+  name = "tapo-poller-cloudwatch-logs"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid    = "ShipPollerLogs"
+      Effect = "Allow"
+      Action = [
+        "logs:CreateLogGroup",
+        "logs:CreateLogStream",
+        "logs:PutLogEvents",
+      ]
+      Resource = "arn:aws:logs:${var.aws_region}:*:log-group:tapo-poller:*"
+    }]
+  })
+}
+
+resource "aws_iam_user_policy_attachment" "poller_logs" {
+  user       = aws_iam_user.poller.name
+  policy_arn = aws_iam_policy.poller_logs.arn
+}
 resource "aws_iam_access_key" "poller" {
   user = aws_iam_user.poller.name
 }
