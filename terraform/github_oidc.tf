@@ -92,6 +92,7 @@ resource "aws_iam_role_policy" "github_actions_deploy" {
           "ssm:PutParameter",
           "ssm:DeleteParameter",
           "ssm:DescribeParameters",
+          "ssm:ListTagsForResource",
           "iam:Get*",
           "iam:List*",
           "iam:PassRole",
