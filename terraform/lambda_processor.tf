@@ -33,7 +33,7 @@ resource "aws_lambda_function" "clip_processor" {
       DYNAMODB_TABLE  = aws_dynamodb_table.camera_clips.name
       S3_BUCKET       = aws_s3_bucket.camera_clips.id
       THUMBNAIL_PREFIX = "thumbnails"
-      TTL_DAYS        = "365"
+      TTL_DAYS        = var.clips_ttl_days
     }
   }
 }

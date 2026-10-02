@@ -21,3 +21,9 @@ variable "poller_user_name" {
   type        = string
   default     = "tapo-poller"
 }
+
+variable "clips_ttl_days" {
+  description = "Number of days to keep clips in S3 and DynamoDB before automatic deletion"
+  type        = number
+  default     = 120
+}
