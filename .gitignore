@@ -1,6 +1,8 @@
 # Terraform
 terraform/.terraform/
+terraform/bootstrap/.terraform/
 terraform/.terraform.lock.hcl
+terraform/bootstrap/.terraform.lock.hcl
 terraform/terraform.tfstate
 terraform/terraform.tfstate.backup
 terraform/terraform.tfvars
