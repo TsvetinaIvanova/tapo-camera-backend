@@ -21,7 +21,7 @@ resource "aws_lambda_function" "clip_query" {
     variables = {
       DYNAMODB_TABLE       = aws_dynamodb_table.camera_clips.name
       S3_BUCKET            = aws_s3_bucket.camera_clips.id
-      PRESIGNED_URL_EXPIRY = "3600"   # 1 hour
+      PRESIGNED_URL_EXPIRY = "3600" # 1 hour
     }
   }
 }
@@ -38,7 +38,7 @@ resource "aws_apigatewayv2_api" "tapo" {
   protocol_type = "HTTP"
 
   cors_configuration {
-    allow_origins = ["*"]   # tighten this to your S3 website URL once deployed
+    allow_origins = ["*"] # tighten this to your S3 website URL once deployed
     allow_methods = ["GET", "OPTIONS"]
     allow_headers = ["Content-Type", "x-api-key"]
     max_age       = 300
@@ -85,7 +85,7 @@ resource "aws_s3_bucket_website_configuration" "frontend" {
   bucket = aws_s3_bucket.frontend.id
 
   index_document { suffix = "index.html" }
-  error_document { key    = "index.html" }
+  error_document { key = "index.html" }
 }
 
 resource "aws_s3_bucket_public_access_block" "frontend" {

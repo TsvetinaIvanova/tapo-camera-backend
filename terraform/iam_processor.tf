@@ -31,21 +31,21 @@ resource "aws_iam_role_policy" "lambda_s3" {
     Version = "2012-10-17"
     Statement = [
       {
-        Sid    = "ReadClips"
-        Effect = "Allow"
-        Action = ["s3:GetObject"]
+        Sid      = "ReadClips"
+        Effect   = "Allow"
+        Action   = ["s3:GetObject"]
         Resource = "${aws_s3_bucket.camera_clips.arn}/clips/*"
       },
       {
-        Sid    = "WriteThumbnails"
-        Effect = "Allow"
-        Action = ["s3:PutObject"]
+        Sid      = "WriteThumbnails"
+        Effect   = "Allow"
+        Action   = ["s3:PutObject"]
         Resource = "${aws_s3_bucket.camera_clips.arn}/thumbnails/*"
       },
       {
-        Sid    = "GetObjectMetadata"
-        Effect = "Allow"
-        Action = ["s3:HeadObject"]
+        Sid      = "GetObjectMetadata"
+        Effect   = "Allow"
+        Action   = ["s3:HeadObject"]
         Resource = "${aws_s3_bucket.camera_clips.arn}/clips/*"
       }
     ]

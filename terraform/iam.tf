@@ -59,10 +59,6 @@ resource "aws_iam_user_policy_attachment" "poller_upload" {
 # ── Poller CloudWatch Logs permission ──────────────────────
 # Scoped to only the tapo-poller log group — same least-privilege
 # pattern as the PutObject-only S3 policy already on this user.
-#
-# NOTE: assumes your existing IAM user resource is named
-# `aws_iam_user.poller` in iam.tf — adjust the reference below if
-# it's actually named something else there.
 
 resource "aws_iam_policy" "poller_logs" {
   name = "tapo-poller-cloudwatch-logs"
