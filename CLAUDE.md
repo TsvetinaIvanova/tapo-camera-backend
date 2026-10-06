@@ -31,7 +31,7 @@ docs/              project-notes.md (decisions, history, backlog)
 - S3: `vladaya-tapo-cameras` (`clips/{camera}/{YYYYMMDD}/...`, `thumbnails/...`), frontend bucket `vladaya-tapo-cameras-frontend`
 - DynamoDB: `tapo-camera-clips` (PK `camera_id`, SK `start_time`; GSI `date-start_time-index`)
 - Lambdas: `tapo-clip-processor`, `tapo-clip-query`, `tapo-api-authorizer`
-- Region `eu-central-1`; TF state in S3 `vladaya-tapo-tf-state`, lock table `tapo-tf-state-lock`
+- Region `eu-central-1`; TF state in S3 `tapo-cameras-backend-tf-state` (S3-native locking, `use_lockfile = true`)
 - CloudWatch: namespace `Tapo/Camera`, log group `tapo-poller`, alarm `tapo-no-uploads-1h`, SNS topic `tapo-camera-alerts`
 - AWS profile on the Pi: `tapo-poller` (IAM user, deliberately kept as a long-lived least-privilege user)
 - GitHub OIDC role: `tapo-github-actions`, secret `AWS_ROLE_ARN`

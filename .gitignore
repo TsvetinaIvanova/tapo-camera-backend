@@ -1,19 +1,24 @@
 # Terraform
 terraform/.terraform/
 terraform/bootstrap/.terraform/
-terraform/.terraform.lock.hcl
-terraform/bootstrap/.terraform.lock.hcl
-terraform/terraform.tfstate
-terraform/terraform.tfstate.backup
+*.tfstate
+*.tfstate.*
 terraform/terraform.tfvars
+terraform/lambda/*/handler.zip
 
-# Config
+# Config and state
 poller/config.yaml
+state.json
 
 # Python
 __pycache__/
 *.pyc
 .env
+.venv/
+.pytest_cache/
+
+# Claude Code (local, per-user)
+.claude/settings.local.json
 
 # Other
 poller/get_videos.py

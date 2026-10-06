@@ -12,6 +12,7 @@ Imported by CLAUDE.md. Update this file when a decision is made or a backlog ite
 - **Heartbeat + error metrics come from the poller itself**, because `ClipsProcessed` alone cannot distinguish "poller broken" from "quiet night".
 - **Alarm design:** `ClipsProcessed` metric filter has `default_value = 0` and the alarm uses `treat_missing_data = "breaching"`. An earlier "alarm never fired" incident was actually an unconfirmed SNS email subscription (confirmation mail was in spam).
 - **GitHub OIDC role stays broad** (service-level wildcards): pragmatic for a personal project.
+- **No auto-PR workflow.** A PR created with the default `GITHUB_TOKEN` does not trigger other workflows, so CI would not run on it; making it work needs a PAT or GitHub App token. Not worth the extra credential for a solo repo. Use `gh pr create --draft --fill` instead.
 
 ## Incident log (lessons)
 
@@ -22,24 +23,11 @@ Imported by CLAUDE.md. Update this file when a decision is made or a backlog ite
 - C660 intermittent `No route to host`: battery camera dropping Wi-Fi between wakes. Handled by retry next cycle; watch `PollCycleErrors{CameraName=c660_street}` for patterns.
 - Pi lost Wi-Fi after power outage: NetworkManager exhausted autoconnect retries before the router was up; fixed with `connection.autoconnect-retries 0` via `nmcli` plus a global NetworkManager conf.d setting.
 
-## Drafted in chat: verify what is actually deployed
-
-These were written during the planning conversation. Confirm each is merged/applied before building on it.
-
-- [ ] `terraform/authorizer.tf`, `terraform/lambda/authorizer/handler.py`, updated `lambda_query.tf` (CORS + route authorizer), updated `frontend/index.html` (access-code gate). Needs `hashicorp/random` in `required_providers`. After apply: `terraform output -raw api_shared_secret`.
-- [ ] `terraform/monitoring_additions.tf` merged into monitoring (per-camera heartbeat and error alarms via `for_each`; camera names in `locals` must match `config.yaml`).
-- [ ] Poller IAM user has `cloudwatch:PutMetricData` and the log permissions from `iam_poller_logs.tf` (confirm the reference `aws_iam_user.tapo_poller` matches the real resource name).
-- [ ] `watchtower` installed on the Pi (`pip3 install watchtower`, add `--break-system-packages` if required).
-- [ ] Updated `poller.py` deployed to the Pi and `tapo-poller` restarted; `StateDirectory=tapo-poller` in the unit file; `state_file: /var/lib/tapo-poller/state.json` in config.
-- [ ] SNS subscription for `tapo-camera-alerts` is `Confirmed`.
-- [ ] DHCP reservations set for all four cameras in the Deco app.
-- [ ] `.github/workflows/auto-pr.yml` (idempotent draft PR on branch push): written but deliberately put on hold. Needs "Allow GitHub Actions to create and approve pull requests" enabled in repo settings.
-
 ## Small cleanups
 
 - `config.yaml.example` is out of date: add per-camera `interval_seconds`, `night_mode`, and `poller.cloudwatch_log_group`. Placeholder passwords only.
 - In the real config, C660 `night_mode.interval_seconds: 3200` was commented as "1h" (3600 would be exact) and `start_hour: 22` was commented as 21:00. Fix whichever side is wrong.
-- Terraform backend: `dynamodb_table` is deprecated in favor of `use_lockfile = true`. Migrate safely by setting both, applying, then removing `dynamodb_table`. The CI role needs `s3:GetObject/PutObject/DeleteObject` on the `.tflock` key. Then the lock table can be deleted.
+- Terraform backend already migrated to `use_lockfile = true` (no `dynamodb_table`). If the old `tapo-tf-state-lock` DynamoDB table still exists, delete it.
 
 ## Backlog (rough priority)
 
