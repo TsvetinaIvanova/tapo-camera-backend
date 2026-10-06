@@ -6,7 +6,7 @@ variable "aws_region" {
 
 variable "bucket_name" {
   description = "Globally unique S3 bucket name for camera clips"
-  default     = "vladaya-tapo-cameras"   # your actual bucket name
+  default     = "vladaya-tapo-cameras" # your actual bucket name
   type        = string
 }
 

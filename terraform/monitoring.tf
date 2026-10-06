@@ -27,7 +27,7 @@ resource "aws_cloudwatch_log_metric_filter" "clip_processed" {
     name          = "ClipsProcessed"
     namespace     = "Tapo/Camera"
     value         = "1"
-    default_value = "0"   # emit 0 when no log matches — essential for the alarm to fire
+    default_value = "0" # emit 0 when no log matches — essential for the alarm to fire
   }
 }
 
@@ -41,14 +41,14 @@ resource "aws_cloudwatch_metric_alarm" "no_uploads" {
   namespace           = "Tapo/Camera"
   metric_name         = "ClipsProcessed"
   statistic           = "Sum"
-  period              = 3600   # 1 hour window
+  period              = 3600 # 1 hour window
   evaluation_periods  = 1
   threshold           = 1
   comparison_operator = "LessThanThreshold"
-  treat_missing_data  = "breaching"   # no data = alarm, not OK
+  treat_missing_data  = "breaching" # no data = alarm, not OK
 
   alarm_actions = [aws_sns_topic.alerts.arn]
-  ok_actions    = [aws_sns_topic.alerts.arn]   # also notify when it recovers
+  ok_actions    = [aws_sns_topic.alerts.arn] # also notify when it recovers
 }
 
 # ── Lambda error alarm ─────────────────────────────────────
@@ -56,16 +56,16 @@ resource "aws_cloudwatch_metric_alarm" "no_uploads" {
 # This catches issues like IAM permission failures, DynamoDB throttling,
 # or code errors that prevent metadata from being written.
 resource "aws_cloudwatch_metric_alarm" "lambda_errors" {
-  alarm_name          = "tapo-processor-errors"
-  alarm_description   = "tapo-clip-processor Lambda error rate elevated"
-  namespace           = "AWS/Lambda"
-  metric_name         = "Errors"
+  alarm_name        = "tapo-processor-errors"
+  alarm_description = "tapo-clip-processor Lambda error rate elevated"
+  namespace         = "AWS/Lambda"
+  metric_name       = "Errors"
   dimensions = {
     FunctionName = "tapo-clip-processor"
   }
   statistic           = "Sum"
-  period              = 300    # check every 5 minutes
-  evaluation_periods  = 3      # alarm after 15 minutes of errors
+  period              = 300 # check every 5 minutes
+  evaluation_periods  = 3   # alarm after 15 minutes of errors
   threshold           = 3
   comparison_operator = "GreaterThanOrEqualToThreshold"
   treat_missing_data  = "notBreaching"
@@ -96,20 +96,20 @@ locals {
 resource "aws_cloudwatch_metric_alarm" "poller_heartbeat" {
   for_each = toset(local.tapo_camera_names)
 
-  alarm_name          = "tapo-poller-heartbeat-${each.value}"
-  alarm_description   = "No poll cycle reported for ${each.value} in 30 minutes — poller thread may be dead or hung"
-  namespace           = "Tapo/Camera"
-  metric_name         = "PollCycleCompleted"
+  alarm_name        = "tapo-poller-heartbeat-${each.value}"
+  alarm_description = "No poll cycle reported for ${each.value} in 30 minutes — poller thread may be dead or hung"
+  namespace         = "Tapo/Camera"
+  metric_name       = "PollCycleCompleted"
   dimensions = {
     CameraName = each.value
   }
-  statistic           = "Sum"
-  period              = 1800   # 30 minutes — a few missed cycles even
-                                # on the slowest (night_mode) interval
+  statistic = "Sum"
+  period    = 1800 # 30 minutes — a few missed cycles even
+  # on the slowest (night_mode) interval
   evaluation_periods  = 1
   threshold           = 1
   comparison_operator = "LessThanThreshold"
-  treat_missing_data  = "breaching"   # no data = the thread stopped reporting = alarm
+  treat_missing_data  = "breaching" # no data = the thread stopped reporting = alarm
 
   alarm_actions = [aws_sns_topic.alerts.arn]
   ok_actions    = [aws_sns_topic.alerts.arn]
@@ -122,10 +122,10 @@ resource "aws_cloudwatch_metric_alarm" "poller_heartbeat" {
 resource "aws_cloudwatch_metric_alarm" "poller_errors" {
   for_each = toset(local.tapo_camera_names)
 
-  alarm_name          = "tapo-poller-errors-${each.value}"
-  alarm_description   = "${each.value} poller is reporting errors — connection, auth, or download failures"
-  namespace           = "Tapo/Camera"
-  metric_name         = "PollCycleErrors"
+  alarm_name        = "tapo-poller-errors-${each.value}"
+  alarm_description = "${each.value} poller is reporting errors — connection, auth, or download failures"
+  namespace         = "Tapo/Camera"
+  metric_name       = "PollCycleErrors"
   dimensions = {
     CameraName = each.value
   }
@@ -134,7 +134,7 @@ resource "aws_cloudwatch_metric_alarm" "poller_errors" {
   evaluation_periods  = 1
   threshold           = 1
   comparison_operator = "GreaterThanOrEqualToThreshold"
-  treat_missing_data  = "notBreaching"  # no errors reported = healthy, not alarming
+  treat_missing_data  = "notBreaching" # no errors reported = healthy, not alarming
 
   alarm_actions = [aws_sns_topic.alerts.arn]
   ok_actions    = [aws_sns_topic.alerts.arn]

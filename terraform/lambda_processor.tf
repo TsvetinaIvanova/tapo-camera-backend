@@ -25,15 +25,15 @@ resource "aws_lambda_function" "clip_processor" {
 
   layers = [local.ffmpeg_layer_arn]
 
-  timeout     = 60    # seconds — thumbnail extraction is fast, but download may take a moment
-  memory_size = 512   # MB — ffmpeg needs headroom; /tmp is 512MB by default
+  timeout     = 60  # seconds — thumbnail extraction is fast, but download may take a moment
+  memory_size = 512 # MB — ffmpeg needs headroom; /tmp is 512MB by default
 
   environment {
     variables = {
-      DYNAMODB_TABLE  = aws_dynamodb_table.camera_clips.name
-      S3_BUCKET       = aws_s3_bucket.camera_clips.id
+      DYNAMODB_TABLE   = aws_dynamodb_table.camera_clips.name
+      S3_BUCKET        = aws_s3_bucket.camera_clips.id
       THUMBNAIL_PREFIX = "thumbnails"
-      TTL_DAYS        = var.clips_ttl_days
+      TTL_DAYS         = var.clips_ttl_days
     }
   }
 }

@@ -7,7 +7,7 @@
 
 resource "random_password" "api_shared_secret" {
   length  = 32
-  special = false   # keep it easy to type/paste without escaping issues
+  special = false # keep it easy to type/paste without escaping issues
 }
 
 resource "aws_ssm_parameter" "api_shared_secret" {
