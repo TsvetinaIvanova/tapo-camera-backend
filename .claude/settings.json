@@ -1,0 +1,30 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(terraform fmt:*)",
+      "Bash(terraform validate:*)",
+      "Bash(terraform plan:*)",
+      "Bash(terraform output:*)",
+      "Bash(python3 -m pytest:*)",
+      "Bash(python -m pytest:*)",
+      "Bash(python3 -m py_compile:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)"
+    ],
+    "ask": [
+      "Bash(terraform apply:*)",
+      "Bash(git push:*)",
+      "Bash(aws lambda update-function-code:*)"
+    ],
+    "deny": [
+      "Bash(terraform destroy:*)",
+      "Read(./poller/config.yaml)",
+      "Read(./frontend/config.json)",
+      "Read(**/*.tfstate)",
+      "Read(**/*.tfstate.backup)",
+      "Read(**/.aws/credentials)",
+      "Read(**/.env)"
+    ]
+  }
+}
