@@ -1,3 +1,41 @@
+output "dynamodb_table_name" {
+  value = aws_dynamodb_table.camera_clips.name
+}
+
+output "lambda_function_name" {
+  value = aws_lambda_function.clip_processor.function_name
+}
+
+output "lambda_log_group" {
+  value = aws_cloudwatch_log_group.clip_processor.name
+}
+
+output "api_endpoint" {
+  description = "API Gateway endpoint — use this in the frontend config"
+  value       = aws_apigatewayv2_stage.tapo.invoke_url
+}
+
+output "frontend_bucket" {
+  description = "S3 bucket for the static frontend"
+  value       = aws_s3_bucket.frontend.id
+}
+
+output "frontend_url" {
+  description = "Static website URL"
+  value       = "http://${aws_s3_bucket_website_configuration.frontend.website_endpoint}"
+}
+
+output "api_shared_secret" {
+  description = "Shared secret for the frontend's access-code prompt (sensitive — run: terraform output -raw api_shared_secret)"
+  value       = random_password.api_shared_secret.result
+  sensitive   = true
+}
+
+output "sns_topic_arn" {
+  description = "SNS topic ARN for camera alerts"
+  value       = aws_sns_topic.alerts.arn
+}
+
 output "bucket_name" {
   description = "S3 bucket name for camera clips"
   value       = aws_s3_bucket.camera_clips.id
@@ -7,4 +45,3 @@ output "bucket_arn" {
   description = "S3 bucket ARN"
   value       = aws_s3_bucket.camera_clips.arn
 }
-

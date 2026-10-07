@@ -1,4 +1,5 @@
-# ── SNS Topic ─────────────────────────────────────────────
+# ── Alert topic ─────────────────────────────────────────────
+
 resource "aws_sns_topic" "alerts" {
   name = "tapo-camera-alerts"
 }
@@ -9,7 +10,8 @@ resource "aws_sns_topic_subscription" "email" {
   endpoint  = var.alert_email
 }
 
-# ── Metric filter ──────────────────────────────────────────
+# ── Pipeline alarms ─────────────────────────────────────────
+
 # Counts successful clip uploads by looking for the log line
 # the processor Lambda emits after a successful DynamoDB write.
 resource "aws_cloudwatch_log_metric_filter" "clip_processed" {
@@ -25,7 +27,6 @@ resource "aws_cloudwatch_log_metric_filter" "clip_processed" {
   }
 }
 
-# ── Alarm ─────────────────────────────────────────────────
 # Fires when fewer than 1 clip has been processed in 60 minutes.
 # Uses a single 60-minute evaluation period so the alarm fires
 # as soon as one full hour passes with no uploads.
@@ -45,7 +46,6 @@ resource "aws_cloudwatch_metric_alarm" "no_uploads" {
   ok_actions    = [aws_sns_topic.alerts.arn] # also notify when it recovers
 }
 
-# ── Lambda error alarm ─────────────────────────────────────
 # Secondary alarm: alert if the processor Lambda itself starts erroring.
 # This catches issues like IAM permission failures, DynamoDB throttling,
 # or code errors that prevent metadata from being written.
@@ -68,13 +68,13 @@ resource "aws_cloudwatch_metric_alarm" "lambda_errors" {
   ok_actions    = [aws_sns_topic.alerts.arn]
 }
 
-# ── Poller heartbeat + error alarms ────────────────────────
+# ── Poller heartbeat + error alarms ─────────────────────────
+
 # These come directly from the poller (via boto3 put_metric_data), not
 # from downstream log lines — so they detect the poller itself being
 # dead/hung or erroring, independent of whether any camera actually
 # saw motion. Complements the existing ClipsProcessed alarm, which
 # can't distinguish "poller down" from "quiet night, no clips."
-
 locals {
   # Keep this in sync with the "name" fields in poller/config.yaml.
   tapo_camera_names = [
@@ -132,10 +132,4 @@ resource "aws_cloudwatch_metric_alarm" "poller_errors" {
 
   alarm_actions = [aws_sns_topic.alerts.arn]
   ok_actions    = [aws_sns_topic.alerts.arn]
-}
-
-# ── Outputs ───────────────────────────────────────────────
-output "sns_topic_arn" {
-  description = "SNS topic ARN for camera alerts"
-  value       = aws_sns_topic.alerts.arn
 }
