@@ -18,10 +18,16 @@ resource "aws_ssm_parameter" "api_shared_secret" {
 
 # ── Authorizer Lambda ───────────────────────────────────────
 
+locals {
+  authorizer_function_name = "tapo-api-authorizer"
+}
+
 data "archive_file" "lambda_authorizer" {
   type        = "zip"
   source_file = "${path.module}/lambda/authorizer/handler.py"
   output_path = "${path.module}/lambda/authorizer/handler.zip"
+
+  output_file_mode = "0644" # deterministic zip, see lambda_processor.tf
 }
 
 resource "aws_iam_role" "lambda_authorizer" {
@@ -60,7 +66,7 @@ resource "aws_iam_role_policy" "lambda_authorizer_ssm" {
 }
 
 resource "aws_lambda_function" "api_authorizer" {
-  function_name    = "tapo-api-authorizer"
+  function_name    = local.authorizer_function_name
   role             = aws_iam_role.lambda_authorizer.arn
   runtime          = "python3.12"
   handler          = "handler.lambda_handler"
@@ -75,10 +81,12 @@ resource "aws_lambda_function" "api_authorizer" {
       SECRET_PARAMETER_NAME = aws_ssm_parameter.api_shared_secret.name
     }
   }
+
+  depends_on = [aws_cloudwatch_log_group.api_authorizer] # see lambda_processor.tf
 }
 
 resource "aws_cloudwatch_log_group" "api_authorizer" {
-  name              = "/aws/lambda/${aws_lambda_function.api_authorizer.function_name}"
+  name              = "/aws/lambda/${local.authorizer_function_name}"
   retention_in_days = 30
 }
 

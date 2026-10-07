@@ -4,6 +4,8 @@
 # Full list: https://github.com/nicholasgasior/aws-lambda-ffmpeg-layer
 locals {
   ffmpeg_layer_arn = "arn:aws:lambda:eu-central-1:175033217214:layer:ffmpeg:1"
+
+  processor_function_name = "tapo-clip-processor"
 }
 
 # ── Lambda deployment package ─────────────────────────────
@@ -12,11 +14,15 @@ data "archive_file" "lambda_processor" {
   type        = "zip"
   source_file = "${path.module}/lambda/processor/handler.py"
   output_path = "${path.module}/lambda/processor/handler.zip"
+
+  # Normalize permissions so the zip (and its hash) is identical on any
+  # machine; otherwise a local 664 file vs CI's 644 forces a redeploy.
+  output_file_mode = "0644"
 }
 
 # ── Lambda function ───────────────────────────────────────
 resource "aws_lambda_function" "clip_processor" {
-  function_name    = "tapo-clip-processor"
+  function_name    = local.processor_function_name
   role             = aws_iam_role.lambda_processor.arn
   runtime          = "python3.12"
   handler          = "handler.lambda_handler"
@@ -36,12 +42,16 @@ resource "aws_lambda_function" "clip_processor" {
       TTL_DAYS         = var.clips_ttl_days
     }
   }
+
+  # Log group must exist before the function can be invoked, otherwise
+  # Lambda auto-creates it and the Terraform-managed one fails to create.
+  depends_on = [aws_cloudwatch_log_group.clip_processor]
 }
 
 # ── CloudWatch Log Group ──────────────────────────────────
 # Explicitly managed so Terraform controls retention
 resource "aws_cloudwatch_log_group" "clip_processor" {
-  name              = "/aws/lambda/${aws_lambda_function.clip_processor.function_name}"
+  name              = "/aws/lambda/${local.processor_function_name}"
   retention_in_days = 30
 }
 
