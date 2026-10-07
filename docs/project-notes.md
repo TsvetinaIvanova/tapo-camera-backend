@@ -29,6 +29,24 @@ Imported by CLAUDE.md. Update this file when a decision is made or a backlog ite
 - In the real config, C660 `night_mode.interval_seconds: 3200` was commented as "1h" (3600 would be exact) and `start_hour: 22` was commented as 21:00. Fix whichever side is wrong.
 - Terraform backend already migrated to `use_lockfile = true` (no `dynamodb_table`). If the old `tapo-tf-state-lock` DynamoDB table still exists, delete it.
 
+## Next up: Terraform cleanup (agreed 2026-10-06)
+
+Review done; work in this order, one small PR each, every PR with a `plan` attached. PRs #14 (repo hygiene) and #15 (random provider + fmt) should be merged first.
+
+1. **Small fixes**
+   - Log group race: all three Lambdas name their log group from the function, so it is created after the function; an early invocation auto-creates it and the apply fails. Name it from a fixed string and make the function `depends_on` it (or use `logging_config`).
+   - `monitoring.tf` hardcodes `/aws/lambda/tapo-clip-processor` and `FunctionName`; reference the resources instead.
+   - API CORS `allow_origins = ["*"]`: restrict to the frontend website URL.
+   - `alert_email` has no default (breaks the convention) and lives in `monitoring.tf`; move to `variables.tf`.
+   - `deploy.yml`: delete the "Release state lock on failure" step (queries the deleted DynamoDB lock table; auto force-unlock is unsafe anyway), add a `concurrency:` group, drop the duplicate `update-function-code` job (Terraform already owns Lambda code via `archive_file`), fix the nonexistent `lambda_function_name_query` output reference.
+   - Delete `removed.tf` (already applied).
+2. **Regroup files by component (zero-diff)**: `storage.tf` (clips bucket + DynamoDB), `processor.tf` (Lambda + IAM + S3 trigger), `api.tf` (query + authorizer Lambdas, API Gateway, their IAM), `frontend.tf`, `poller.tf` (IAM user/policies/key), `monitoring.tf`; all variables in `variables.tf`, all outputs in `outputs.tf` (keep output names: `deploy.yml` uses them). Then update the CLAUDE.md layout section (also add `bootstrap/`). Plan must show no changes.
+3. **Optional: `modules/lambda`** for the repeated archive + role + basic policy + log group + function. Needs ~15 `moved {}` blocks; target is a zero-diff plan.
+4. **ffmpeg layer**: currently a public layer from a third-party account (`175033217214`), with a hardcoded region. Supply-chain risk: replace with a self-built layer managed in Terraform, or a container-image Lambda.
+
+Not doing: splitting the main stack into multiple states. `bootstrap/` already provides the privilege-boundary split; more stacks would be overkill at ~100 resources.
+Known and accepted: `aws_iam_access_key` and `random_password` put secrets in tfstate. This is acceptable because the state bucket is encrypted and access-restricted.
+
 ## Backlog (rough priority)
 
 1. **GDPR for C660** (public road in frame): privacy masking or signage. Do this before making the repo or a demo public.
