@@ -1,13 +1,19 @@
 # ── Query Lambda ─────────────────────────────────────────
 
+locals {
+  query_function_name = "tapo-clip-query"
+}
+
 data "archive_file" "lambda_query" {
   type        = "zip"
   source_file = "${path.module}/lambda/query/handler.py"
   output_path = "${path.module}/lambda/query/handler.zip"
+
+  output_file_mode = "0644" # deterministic zip, see lambda_processor.tf
 }
 
 resource "aws_lambda_function" "clip_query" {
-  function_name    = "tapo-clip-query"
+  function_name    = local.query_function_name
   role             = aws_iam_role.lambda_query.arn
   runtime          = "python3.12"
   handler          = "handler.lambda_handler"
@@ -24,10 +30,12 @@ resource "aws_lambda_function" "clip_query" {
       PRESIGNED_URL_EXPIRY = "3600" # 1 hour
     }
   }
+
+  depends_on = [aws_cloudwatch_log_group.clip_query] # see lambda_processor.tf
 }
 
 resource "aws_cloudwatch_log_group" "clip_query" {
-  name              = "/aws/lambda/${aws_lambda_function.clip_query.function_name}"
+  name              = "/aws/lambda/${local.query_function_name}"
   retention_in_days = 30
 }
 
@@ -38,7 +46,10 @@ resource "aws_apigatewayv2_api" "tapo" {
   protocol_type = "HTTP"
 
   cors_configuration {
-    allow_origins = ["*"] # tighten this to your S3 website URL once deployed
+    allow_origins = concat(
+      ["http://${aws_s3_bucket_website_configuration.frontend.website_endpoint}"],
+      var.api_cors_extra_origins,
+    )
     allow_methods = ["GET", "OPTIONS"]
     allow_headers = ["Content-Type", "x-api-key"]
     max_age       = 300

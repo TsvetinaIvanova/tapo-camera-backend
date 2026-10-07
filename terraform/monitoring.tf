@@ -1,9 +1,3 @@
-# ── Variables ─────────────────────────────────────────────
-variable "alert_email" {
-  description = "Email address to receive CloudWatch alarm notifications"
-  type        = string
-}
-
 # ── SNS Topic ─────────────────────────────────────────────
 resource "aws_sns_topic" "alerts" {
   name = "tapo-camera-alerts"
@@ -20,7 +14,7 @@ resource "aws_sns_topic_subscription" "email" {
 # the processor Lambda emits after a successful DynamoDB write.
 resource "aws_cloudwatch_log_metric_filter" "clip_processed" {
   name           = "tapo-clip-processed"
-  log_group_name = "/aws/lambda/tapo-clip-processor"
+  log_group_name = aws_cloudwatch_log_group.clip_processor.name
   pattern        = "\"Metadata written for\""
 
   metric_transformation {
@@ -61,7 +55,7 @@ resource "aws_cloudwatch_metric_alarm" "lambda_errors" {
   namespace         = "AWS/Lambda"
   metric_name       = "Errors"
   dimensions = {
-    FunctionName = "tapo-clip-processor"
+    FunctionName = aws_lambda_function.clip_processor.function_name
   }
   statistic           = "Sum"
   period              = 300 # check every 5 minutes

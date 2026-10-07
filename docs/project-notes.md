@@ -33,7 +33,7 @@ Imported by CLAUDE.md. Update this file when a decision is made or a backlog ite
 
 Review done; work in this order, one small PR each, every PR with a `plan` attached. PRs #14 (repo hygiene) and #15 (random provider + fmt) should be merged first.
 
-1. **Small fixes**
+1. **Small fixes** (done in PR `terraform-small-fixes`; also fixed: local and CI zips had different hashes because of file permissions (664 vs 644), so every local `plan` showed false Lambda redeploys)
    - Log group race: all three Lambdas name their log group from the function, so it is created after the function; an early invocation auto-creates it and the apply fails. Name it from a fixed string and make the function `depends_on` it (or use `logging_config`).
    - `monitoring.tf` hardcodes `/aws/lambda/tapo-clip-processor` and `FunctionName`; reference the resources instead.
    - API CORS `allow_origins = ["*"]`: restrict to the frontend website URL.

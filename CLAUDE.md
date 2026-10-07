@@ -56,10 +56,10 @@ docs/              project-notes.md (decisions, history, backlog)
 
 ## Conventions
 
-- Terraform: every variable has a default (no prompts in CI). Plan runs on `pull_request` only. Least-privilege IAM per resource; the GitHub OIDC role is intentionally broad (service-level wildcards).
+- Terraform: every variable has a default (no prompts in CI), except `alert_email`: it is required on purpose so a missing value fails loudly instead of silently dropping alerting (CI: `TF_VAR_alert_email` secret; locally: `terraform.tfvars`). Plan runs on `pull_request` only. Least-privilege IAM per resource; the GitHub OIDC role is intentionally broad (service-level wildcards).
 - CI: `actions/checkout@v6`, `actions/setup-python@v6`, `python -m pytest`. No stored AWS keys.
 - Frontend never hardcodes the API endpoint (reads `config.json` at runtime). API auth is a shared secret sent as the `x-api-key` header, kept in localStorage.
-- Lambda deploy: zip handler.py, `aws lambda update-function-code`, then `aws lambda wait function-updated`.
+- Lambda deploy: Terraform owns Lambda code (`archive_file` with `output_file_mode = "0644"` so zips are byte-identical locally and in CI). Merging to `main` deploys it; no separate `update-function-code` step.
 - Never commit `config.yaml`, `config.json`, state files or `.tfstate`. Never print or log camera passwords or the API secret.
 
 ## Working agreements

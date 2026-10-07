@@ -27,3 +27,23 @@ variable "clips_ttl_days" {
   type        = number
   default     = 120
 }
+# Deliberately no default: this is the only alerting path, so a missing
+# value should fail the plan loudly rather than silently drop the SNS
+# subscription. CI supplies it via TF_VAR_alert_email; locally it comes
+# from terraform.tfvars (gitignored, keeps the address out of the repo).
+variable "alert_email" {
+  description = "Email address to receive CloudWatch alarm notifications"
+  type        = string
+  nullable    = false
+
+  validation {
+    condition     = can(regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$", var.alert_email))
+    error_message = "alert_email must be a valid email address."
+  }
+}
+
+variable "api_cors_extra_origins" {
+  description = "Origins allowed to call the API besides the S3 website (e.g. local frontend dev server)"
+  type        = list(string)
+  default     = ["http://localhost:8000"]
+}
