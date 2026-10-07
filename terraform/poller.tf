@@ -1,7 +1,10 @@
-# Dedicated IAM user for the local poller script (Raspberry Pi / VM).
-# Scoped to upload-only access on the clips/ prefix of this one bucket —
-# no read, no delete, no access to anything else in the account.
+# ── Poller IAM user (Raspberry Pi) ──────────────────────────
 
+# Dedicated IAM user for the poller on the Raspberry Pi. Long-lived key by
+# design (see docs/project-notes.md). Least privilege: PutObject and a
+# prefix-scoped ListBucket on clips/ of this one bucket, PutMetricData in
+# the Tapo/Camera namespace, and log writes to the tapo-poller log group.
+# No GetObject, no delete, nothing else in the account.
 resource "aws_iam_user" "poller" {
   name = var.poller_user_name
 }
@@ -56,10 +59,8 @@ resource "aws_iam_user_policy_attachment" "poller_upload" {
   policy_arn = aws_iam_policy.poller_upload.arn
 }
 
-# ── Poller CloudWatch Logs permission ──────────────────────
 # Scoped to only the tapo-poller log group — same least-privilege
 # pattern as the PutObject-only S3 policy already on this user.
-
 resource "aws_iam_policy" "poller_logs" {
   name = "tapo-poller-cloudwatch-logs"
 
@@ -82,6 +83,7 @@ resource "aws_iam_user_policy_attachment" "poller_logs" {
   user       = aws_iam_user.poller.name
   policy_arn = aws_iam_policy.poller_logs.arn
 }
+
 resource "aws_iam_access_key" "poller" {
   user = aws_iam_user.poller.name
 }

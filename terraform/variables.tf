@@ -27,6 +27,7 @@ variable "clips_ttl_days" {
   type        = number
   default     = 120
 }
+
 # Deliberately no default: this is the only alerting path, so a missing
 # value should fail the plan loudly rather than silently drop the SNS
 # subscription. CI supplies it via TF_VAR_alert_email; locally it comes
