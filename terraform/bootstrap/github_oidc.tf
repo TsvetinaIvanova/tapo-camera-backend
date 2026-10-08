@@ -178,6 +178,20 @@ resource "aws_iam_role_policy" "github_actions_deploy" {
         Resource = "arn:aws:lambda:${local.region}:*:layer:*:*"
       },
       {
+        # Processor image repository (create/manage, push images)
+        Sid      = "ECRRepositories"
+        Effect   = "Allow"
+        Action   = "ecr:*"
+        Resource = "arn:aws:ecr:${local.region}:${local.account_id}:repository/tapo-*"
+      },
+      {
+        # Registry login; this action does not support resource-level scoping
+        Sid      = "ECRAuthToken"
+        Effect   = "Allow"
+        Action   = "ecr:GetAuthorizationToken"
+        Resource = "*"
+      },
+      {
         Sid      = "Logs"
         Effect   = "Allow"
         Action   = "logs:*"

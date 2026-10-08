@@ -1,0 +1,4 @@
+# Allow-list: only what the image needs
+*
+!handler.py
+!requirements.txt

@@ -45,3 +45,8 @@ output "bucket_arn" {
   description = "S3 bucket ARN"
   value       = aws_s3_bucket.camera_clips.arn
 }
+
+output "processor_image_repository_url" {
+  description = "ECR repository for the processor Lambda image"
+  value       = aws_ecr_repository.processor.repository_url
+}
