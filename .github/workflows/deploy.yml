@@ -27,6 +27,7 @@ jobs:
     outputs:
       frontend_bucket: ${{ steps.tf-output.outputs.frontend_bucket }}
       api_endpoint: ${{ steps.tf-output.outputs.api_endpoint }}
+      processor_repo_url: ${{ steps.tf-output.outputs.processor_repo_url }}
 
     steps:
       - uses: actions/checkout@v6
@@ -59,6 +60,60 @@ jobs:
         run: |
           echo "frontend_bucket=$(terraform output -raw frontend_bucket)" >> $GITHUB_OUTPUT
           echo "api_endpoint=$(terraform output -raw api_endpoint)" >> $GITHUB_OUTPUT
+          echo "processor_repo_url=$(terraform output -raw processor_image_repository_url)" >> $GITHUB_OUTPUT
+
+  # ── Processor image: build, test, push, report scan ─────
+  # Runs after apply so the ECR repository exists. Not yet used by the
+  # function (it still runs from the zip + layer).
+  processor-image:
+    name: Processor image
+    runs-on: ubuntu-latest
+    needs: terraform
+    permissions:
+      id-token: write
+      contents: read
+
+    env:
+      REPO_URL: ${{ needs.terraform.outputs.processor_repo_url }}
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Log in to ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build image
+        run: |
+          # Immutable tags must be unique, including for re-runs of the same commit
+          TAG="${GITHUB_SHA::12}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
+          docker build -t "$REPO_URL:$TAG" terraform/lambda/processor
+
+      - name: Smoke test
+        run: terraform/lambda/processor/smoke-test.sh "$REPO_URL:$TAG"
+
+      - name: Push image
+        run: docker push "$REPO_URL:$TAG"
+
+      # Report, don't gate: Debian always has some open low-severity CVEs.
+      - name: Report scan findings
+        run: |
+          REPO="${REPO_URL#*/}"
+          aws ecr wait image-scan-complete --repository-name "$REPO" --image-id imageTag="$TAG"
+          {
+            echo "### Processor image \`$TAG\`"
+            echo "ECR basic scan findings by severity:"
+            echo '```json'
+            aws ecr describe-image-scan-findings --repository-name "$REPO" --image-id imageTag="$TAG" \
+              --query 'imageScanFindings.findingSeverityCounts' --output json
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
   # ── Deploy frontend ─────────────────────────────────────
   deploy-frontend:

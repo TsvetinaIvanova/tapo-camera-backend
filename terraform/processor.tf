@@ -96,3 +96,51 @@ resource "aws_lambda_permission" "allow_s3" {
   principal     = "s3.amazonaws.com"
   source_arn    = aws_s3_bucket.camera_clips.arn
 }
+
+# ── Container image repository ──────────────────────────────
+# Image build of the processor (terraform/lambda/processor/Dockerfile),
+# replacing the third-party ffmpeg layer. Built and pushed by deploy.yml.
+
+resource "aws_ecr_repository" "processor" {
+  name = "tapo-clip-processor"
+
+  # Tags are never reused, so a tag always means the same image; the
+  # function will be pinned by digest anyway.
+  image_tag_mutability = "IMMUTABLE"
+
+  image_scanning_configuration {
+    scan_on_push = true # basic scanning: free, OS-package CVEs (incl. Debian's ffmpeg)
+  }
+}
+
+resource "aws_ecr_lifecycle_policy" "processor" {
+  repository = aws_ecr_repository.processor.name
+
+  policy = jsonencode({
+    rules = [
+      {
+        rulePriority = 1
+        description  = "Expire untagged images (superseded build layers) after 1 day"
+        selection = {
+          tagStatus   = "untagged"
+          countType   = "sinceImagePushed"
+          countUnit   = "days"
+          countNumber = 1
+        }
+        action = { type = "expire" }
+      },
+      {
+        # Images are ~220 MB compressed; 5 is enough to roll back a few
+        # deploys. Keep this above the number of deploys you might revert.
+        rulePriority = 2
+        description  = "Keep the 5 most recent images"
+        selection = {
+          tagStatus   = "any"
+          countType   = "imageCountMoreThan"
+          countNumber = 5
+        }
+        action = { type = "expire" }
+      },
+    ]
+  })
+}

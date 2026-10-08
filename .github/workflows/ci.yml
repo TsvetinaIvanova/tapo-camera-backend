@@ -66,6 +66,20 @@ jobs:
         # Note: tests/ directory to be created — skip gracefully if missing
         continue-on-error: true
 
+  # ── Processor image: build + smoke test (no AWS) ────────
+  processor-image:
+    name: Processor image
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Build image
+        run: docker build -t tapo-clip-processor:ci terraform/lambda/processor
+
+      - name: Smoke test
+        run: terraform/lambda/processor/smoke-test.sh tapo-clip-processor:ci
+
   # ── Terraform validate & plan ───────────────────────────
   tf-plan:
     name: Terraform plan
