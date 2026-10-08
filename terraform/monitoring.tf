@@ -16,7 +16,7 @@ resource "aws_sns_topic_subscription" "email" {
 # the processor Lambda emits after a successful DynamoDB write.
 resource "aws_cloudwatch_log_metric_filter" "clip_processed" {
   name           = "tapo-clip-processed"
-  log_group_name = aws_cloudwatch_log_group.clip_processor.name
+  log_group_name = module.processor.log_group_name
   pattern        = "\"Metadata written for\""
 
   metric_transformation {
@@ -55,7 +55,7 @@ resource "aws_cloudwatch_metric_alarm" "lambda_errors" {
   namespace         = "AWS/Lambda"
   metric_name       = "Errors"
   dimensions = {
-    FunctionName = aws_lambda_function.clip_processor.function_name
+    FunctionName = module.processor.function_name
   }
   statistic           = "Sum"
   period              = 300 # check every 5 minutes

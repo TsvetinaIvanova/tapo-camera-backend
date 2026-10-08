@@ -24,7 +24,7 @@ resource "aws_apigatewayv2_stage" "tapo" {
 resource "aws_apigatewayv2_integration" "clip_query" {
   api_id             = aws_apigatewayv2_api.tapo.id
   integration_type   = "AWS_PROXY"
-  integration_uri    = aws_lambda_function.clip_query.invoke_arn
+  integration_uri    = module.query.invoke_arn
   integration_method = "POST"
 }
 
@@ -40,74 +40,32 @@ resource "aws_apigatewayv2_route" "get_clips" {
 resource "aws_lambda_permission" "allow_apigw" {
   statement_id  = "AllowAPIGatewayInvoke"
   action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.clip_query.function_name
+  function_name = module.query.function_name
   principal     = "apigateway.amazonaws.com"
   source_arn    = "${aws_apigatewayv2_api.tapo.execution_arn}/*/*"
 }
 
 # ── Query Lambda ────────────────────────────────────────────
 
-locals {
-  query_function_name = "tapo-clip-query"
-}
+module "query" {
+  source = "./modules/lambda"
 
-data "archive_file" "lambda_query" {
-  type        = "zip"
-  source_file = "${path.module}/lambda/query/handler.py"
-  output_path = "${path.module}/lambda/query/handler.zip"
+  function_name = "tapo-clip-query"
+  source_file   = "${path.module}/lambda/query/handler.py"
+  timeout       = 15
+  memory_size   = 256
 
-  output_file_mode = "0644" # deterministic zip, see processor.tf
-}
-
-resource "aws_lambda_function" "clip_query" {
-  function_name    = local.query_function_name
-  role             = aws_iam_role.lambda_query.arn
-  runtime          = "python3.12"
-  handler          = "handler.lambda_handler"
-  filename         = data.archive_file.lambda_query.output_path
-  source_code_hash = data.archive_file.lambda_query.output_base64sha256
-
-  timeout     = 15
-  memory_size = 256
-
-  environment {
-    variables = {
-      DYNAMODB_TABLE       = aws_dynamodb_table.camera_clips.name
-      S3_BUCKET            = aws_s3_bucket.camera_clips.id
-      PRESIGNED_URL_EXPIRY = "3600" # 1 hour
-    }
+  environment = {
+    DYNAMODB_TABLE       = aws_dynamodb_table.camera_clips.name
+    S3_BUCKET            = aws_s3_bucket.camera_clips.id
+    PRESIGNED_URL_EXPIRY = "3600" # 1 hour
   }
-
-  depends_on = [aws_cloudwatch_log_group.clip_query] # see processor.tf
-}
-
-resource "aws_cloudwatch_log_group" "clip_query" {
-  name              = "/aws/lambda/${local.query_function_name}"
-  retention_in_days = 30
-}
-
-resource "aws_iam_role" "lambda_query" {
-  name = "tapo-clip-query-role"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect    = "Allow"
-      Principal = { Service = "lambda.amazonaws.com" }
-      Action    = "sts:AssumeRole"
-    }]
-  })
-}
-
-resource "aws_iam_role_policy_attachment" "lambda_query_basic" {
-  role       = aws_iam_role.lambda_query.name
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 }
 
 # DynamoDB read — scoped to this table only
 resource "aws_iam_role_policy" "lambda_query_dynamodb" {
   name = "tapo-clip-query-dynamodb"
-  role = aws_iam_role.lambda_query.id
+  role = module.query.role_name
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -129,7 +87,7 @@ resource "aws_iam_role_policy" "lambda_query_dynamodb" {
 # S3 presigned URL generation — needs GetObject on clips and thumbnails
 resource "aws_iam_role_policy" "lambda_query_s3" {
   name = "tapo-clip-query-s3"
-  role = aws_iam_role.lambda_query.id
+  role = module.query.role_name
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -166,7 +124,7 @@ resource "aws_ssm_parameter" "api_shared_secret" {
 resource "aws_apigatewayv2_authorizer" "shared_secret" {
   api_id                            = aws_apigatewayv2_api.tapo.id
   authorizer_type                   = "REQUEST"
-  authorizer_uri                    = aws_lambda_function.api_authorizer.invoke_arn
+  authorizer_uri                    = module.authorizer.invoke_arn
   identity_sources                  = ["$request.header.x-api-key"]
   name                              = "tapo-shared-secret-authorizer"
   authorizer_payload_format_version = "2.0"
@@ -179,66 +137,24 @@ resource "aws_apigatewayv2_authorizer" "shared_secret" {
   authorizer_result_ttl_in_seconds = 300
 }
 
-locals {
-  authorizer_function_name = "tapo-api-authorizer"
-}
+module "authorizer" {
+  source = "./modules/lambda"
 
-data "archive_file" "lambda_authorizer" {
-  type        = "zip"
-  source_file = "${path.module}/lambda/authorizer/handler.py"
-  output_path = "${path.module}/lambda/authorizer/handler.zip"
+  function_name = "tapo-api-authorizer"
+  source_file   = "${path.module}/lambda/authorizer/handler.py"
+  timeout       = 5
+  memory_size   = 128
 
-  output_file_mode = "0644" # deterministic zip, see processor.tf
-}
-
-resource "aws_lambda_function" "api_authorizer" {
-  function_name    = local.authorizer_function_name
-  role             = aws_iam_role.lambda_authorizer.arn
-  runtime          = "python3.12"
-  handler          = "handler.lambda_handler"
-  filename         = data.archive_file.lambda_authorizer.output_path
-  source_code_hash = data.archive_file.lambda_authorizer.output_base64sha256
-
-  timeout     = 5
-  memory_size = 128
-
-  environment {
-    variables = {
-      SECRET_PARAMETER_NAME = aws_ssm_parameter.api_shared_secret.name
-    }
+  environment = {
+    SECRET_PARAMETER_NAME = aws_ssm_parameter.api_shared_secret.name
   }
-
-  depends_on = [aws_cloudwatch_log_group.api_authorizer] # see processor.tf
-}
-
-resource "aws_cloudwatch_log_group" "api_authorizer" {
-  name              = "/aws/lambda/${local.authorizer_function_name}"
-  retention_in_days = 30
-}
-
-resource "aws_iam_role" "lambda_authorizer" {
-  name = "tapo-api-authorizer-role"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect    = "Allow"
-      Principal = { Service = "lambda.amazonaws.com" }
-      Action    = "sts:AssumeRole"
-    }]
-  })
-}
-
-resource "aws_iam_role_policy_attachment" "lambda_authorizer_basic" {
-  role       = aws_iam_role.lambda_authorizer.name
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 }
 
 # Scoped to only this one parameter — least privilege, matching the
 # convention already used for the query Lambda's DynamoDB/S3 access.
 resource "aws_iam_role_policy" "lambda_authorizer_ssm" {
   name = "tapo-api-authorizer-ssm"
-  role = aws_iam_role.lambda_authorizer.id
+  role = module.authorizer.role_name
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -254,7 +170,7 @@ resource "aws_iam_role_policy" "lambda_authorizer_ssm" {
 resource "aws_lambda_permission" "allow_apigw_authorizer" {
   statement_id  = "AllowAPIGatewayInvokeAuthorizer"
   action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.api_authorizer.function_name
+  function_name = module.authorizer.function_name
   principal     = "apigateway.amazonaws.com"
   source_arn    = "${aws_apigatewayv2_api.tapo.execution_arn}/*/*"
 }
