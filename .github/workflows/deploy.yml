@@ -88,12 +88,23 @@ jobs:
       - name: Log in to ECR
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Build image
+      - name: Compute tag
         run: |
           # Immutable tags must be unique, including for re-runs of the same commit
-          TAG="${GITHUB_SHA::12}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          echo "TAG=$TAG" >> "$GITHUB_ENV"
-          docker build -t "$REPO_URL:$TAG" terraform/lambda/processor
+          echo "TAG=${GITHUB_SHA::12}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_ENV"
+
+      - uses: docker/setup-buildx-action@v4
+
+      # Loaded locally (not pushed) so the smoke test runs before the push.
+      - name: Build image
+        uses: docker/build-push-action@v7
+        with:
+          context: terraform/lambda/processor
+          tags: ${{ env.REPO_URL }}:${{ env.TAG }}
+          load: true
+          provenance: false # plain image manifest; Lambda and ECR basic scanning expect one
+          cache-from: type=gha,scope=processor
+          cache-to: type=gha,mode=max,scope=processor
 
       - name: Smoke test
         run: terraform/lambda/processor/smoke-test.sh "$REPO_URL:$TAG"
