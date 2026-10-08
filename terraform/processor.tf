@@ -28,9 +28,9 @@ module "processor" {
 # ── IAM (beyond basic execution, which the module provides) ─
 
 # Scoped S3 permissions:
-# - GetObject on clips/ (read the uploaded clip)
+# - GetObject on clips/ (download the uploaded clip; also authorizes the
+#   HEAD request download_file makes first; there is no s3:HeadObject action)
 # - PutObject on thumbnails/ (write the generated thumbnail)
-# - GetObject on thumbnails/ (verify upload)
 resource "aws_iam_role_policy" "lambda_s3" {
   name = "tapo-clip-processor-s3"
   role = module.processor.role_name
@@ -49,12 +49,6 @@ resource "aws_iam_role_policy" "lambda_s3" {
         Effect   = "Allow"
         Action   = ["s3:PutObject"]
         Resource = "${aws_s3_bucket.camera_clips.arn}/thumbnails/*"
-      },
-      {
-        Sid      = "GetObjectMetadata"
-        Effect   = "Allow"
-        Action   = ["s3:HeadObject"]
-        Resource = "${aws_s3_bucket.camera_clips.arn}/clips/*"
       }
     ]
   })
