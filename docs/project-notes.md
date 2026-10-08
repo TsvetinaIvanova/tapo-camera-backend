@@ -12,6 +12,7 @@ Imported by CLAUDE.md. Update this file when a decision is made or a backlog ite
 - **Heartbeat + error metrics come from the poller itself**, because `ClipsProcessed` alone cannot distinguish "poller broken" from "quiet night".
 - **Alarm design:** `ClipsProcessed` metric filter has `default_value = 0` and the alarm uses `treat_missing_data = "breaching"`. An earlier "alarm never fired" incident was actually an unconfirmed SNS email subscription (confirmation mail was in spam).
 - **GitHub OIDC role stays broad** (service-level wildcards): pragmatic for a personal project.
+- **IAM policies: inline for strictly 1:1 permissions, managed when shared.** Lambda permissions are inline `aws_iam_role_policy` because each is scoped to one function's resources and never reused; inline policies share the role's lifecycle, so they can't be orphaned. This follows AWS guidance (managed by default, inline for a strict one-to-one relationship). Managed-policy versioning adds little when git is the version history. `modules/lambda` creates only the role and basic execution; each caller attaches its own policies to `module.<x>.role_name`, which keeps the module interface small as permission types grow (e.g. Rekognition). Accepted downside: the module doesn't force a Lambda to define its permissions, so a missing one shows up as a runtime `AccessDenied`, not a plan error. The poller user's managed policies predate this rule; leave them unless they're touched for another reason.
 - **No auto-PR workflow.** A PR created with the default `GITHUB_TOKEN` does not trigger other workflows, so CI would not run on it; making it work needs a PAT or GitHub App token. Not worth the extra credential for a solo repo. Use `gh pr create --draft --fill` instead.
 
 ## Incident log (lessons)
@@ -27,6 +28,7 @@ Imported by CLAUDE.md. Update this file when a decision is made or a backlog ite
 
 - `config.yaml.example` is out of date: add per-camera `interval_seconds`, `night_mode`, and `poller.cloudwatch_log_group`. Placeholder passwords only.
 - In the real config, C660 `night_mode.interval_seconds: 3200` was commented as "1h" (3600 would be exact) and `start_hour: 22` was commented as 21:00. Fix whichever side is wrong.
+- Processor S3 policy grants `s3:HeadObject`, which is not a real IAM action (HEAD is authorized by `s3:GetObject`), so that statement is a no-op; its comment also lists `GetObject on thumbnails/`, which isn't granted. Remove the statement and fix the comment (no functional change).
 - Terraform backend already migrated to `use_lockfile = true` (no `dynamodb_table`). If the old `tapo-tf-state-lock` DynamoDB table still exists, delete it.
 
 ## Next up: Terraform cleanup (agreed 2026-10-06)
@@ -41,7 +43,7 @@ Review done; work in this order, one small PR each, every PR with a `plan` attac
    - `deploy.yml`: delete the "Release state lock on failure" step (queries the deleted DynamoDB lock table; auto force-unlock is unsafe anyway), add a `concurrency:` group, drop the duplicate `update-function-code` job (Terraform already owns Lambda code via `archive_file`), fix the nonexistent `lambda_function_name_query` output reference.
    - Delete `removed.tf` (already applied).
 2. **Regroup files by component (zero-diff)** (done in PR `terraform-regroup`): `clips.tf` (clips bucket + DynamoDB), `processor.tf` (Lambda + IAM + S3 trigger), `api.tf` (query + authorizer Lambdas, API Gateway, their IAM), `frontend.tf`, `poller.tf` (IAM user/policies/key), `monitoring.tf`; all variables in `variables.tf`, all outputs in `outputs.tf` (keep output names: `deploy.yml` uses them). Then update the CLAUDE.md layout section (also add `bootstrap/`). Plan must show no changes.
-3. **Optional: `modules/lambda`** for the repeated archive + role + basic policy + log group + function. Needs ~15 `moved {}` blocks; target is a zero-diff plan.
+3. **`modules/lambda`** (done in PR `terraform-lambda-module`): archive + role + basic policy + log group + function. 12 `moved {}` blocks in `moved.tf`; the plan shows 12 moves and 0 changes. Least-privilege policies deliberately stay in the callers. `moved` blocks rather than `terraform state mv`: `deploy.yml` auto-applies on push to `main`, so moving state outside the pipeline would leave a window where an apply plans to destroy and recreate everything; `moved` blocks are reviewed in the PR and applied atomically. **Follow-up:** delete `moved.tf` in a later PR once applied.
 4. **ffmpeg layer**: currently a public layer from a third-party account (`175033217214`), with a hardcoded region. Supply-chain risk: replace with a self-built layer managed in Terraform, or a container-image Lambda.
 
 Not doing: splitting the main stack into multiple states. `bootstrap/` already provides the privilege-boundary split; more stacks would be overkill at ~100 resources.

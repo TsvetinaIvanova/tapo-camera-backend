@@ -3,11 +3,11 @@ output "dynamodb_table_name" {
 }
 
 output "lambda_function_name" {
-  value = aws_lambda_function.clip_processor.function_name
+  value = module.processor.function_name
 }
 
 output "lambda_log_group" {
-  value = aws_cloudwatch_log_group.clip_processor.name
+  value = module.processor.log_group_name
 }
 
 output "api_endpoint" {
