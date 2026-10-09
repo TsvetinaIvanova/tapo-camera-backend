@@ -1,20 +1,61 @@
 # Processor Lambda as a container image (replaces the third-party ffmpeg layer).
 #
-# ffmpeg comes from Debian, not a copied-in static binary: Debian ships
-# security fixes for it, and ECR scanning can only see OS packages, so a
-# vulnerable ffmpeg shows up in scan results.
+# ffmpeg is built from source with only what the handler uses: read an
+# MP4/MOV file, decode H.264/HEVC, encode one MJPEG frame. That leaves out
+# the codec, image and XML libraries a distro ffmpeg pulls in (libtiff,
+# librsvg, libxml2, ...), which account for all of Debian ffmpeg's scan
+# findings, and gives a small, static, LGPL-only binary.
 #
-# Base pinned by digest (from ECR Public, which avoids Docker Hub rate limits);
-# Dependabot bumps it. Rebuilding picks up Debian's latest ffmpeg patch.
-FROM public.ecr.aws/docker/library/python:3.12-slim-trixie@sha256:05cda9777409a9c3ffddd94a4c476b79f0769a0b4857f0c7ed9226b6800b0d6f
+# Tradeoff: ECR scanning only sees OS packages, so it cannot see this ffmpeg.
+# Its CVEs are tracked by pinning FFMPEG_VERSION and following FFmpeg
+# security releases (see docs/project-notes.md).
+#
+# Both stages use the same digest-pinned base (ECR Public, no Docker Hub
+# rate limits), so the binary is built against the same glibc it runs on.
+# The reference is repeated in both FROM lines rather than put in an ARG
+# because Dependabot only bumps literal FROM lines; it updates both together.
+
+# ── Build stage: minimal static ffmpeg ──────────────────────
+FROM public.ecr.aws/docker/library/python:3.12-slim-trixie@sha256:05cda9777409a9c3ffddd94a4c476b79f0769a0b4857f0c7ed9226b6800b0d6f AS ffmpeg-build
+
+# Source tarball pinned by SHA-256. The hash was taken after verifying the
+# tarball's GPG signature against the FFmpeg release signing key
+# (FCF9 86EA 15E6 E293 A564 4F10 B432 2F04 D676 58D8).
+ARG FFMPEG_VERSION=9.0.2
+ARG FFMPEG_SHA256=8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg \
-    && rm -rf /var/lib/apt/lists/* \
-    # The handler calls /opt/bin/ffmpeg (the layer path); keep it working
-    # for both the zip+layer and the image packaging.
-    && mkdir -p /opt/bin \
-    && ln -s /usr/bin/ffmpeg /opt/bin/ffmpeg
+    && apt-get install -y --no-install-recommends build-essential nasm pkg-config xz-utils \
+    && rm -rf /var/lib/apt/lists/*
+
+ADD --checksum=sha256:${FFMPEG_SHA256} \
+    https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz /tmp/ffmpeg.tar.xz
+
+WORKDIR /tmp/ffmpeg
+RUN tar -xJf /tmp/ffmpeg.tar.xz --strip-components=1 \
+    && ./configure \
+        --prefix=/opt/ffmpeg \
+        --enable-static --disable-shared \
+        --disable-autodetect --disable-everything \
+        --disable-doc --disable-debug --disable-network \
+        --disable-ffplay --disable-ffprobe --disable-avdevice \
+        --enable-protocol=file \
+        --enable-demuxer=mov \
+        --enable-parser=h264,hevc \
+        --enable-decoder=h264,hevc \
+        --enable-encoder=mjpeg \
+        --enable-muxer=image2 \
+        --enable-filter=scale \
+    && make -j"$(nproc)" \
+    && make install \
+    && strip /opt/ffmpeg/bin/ffmpeg \
+    && cd / && rm -rf /tmp/ffmpeg /tmp/ffmpeg.tar.xz   # keep the cached layer small
+
+# ── Runtime stage ───────────────────────────────────────────
+FROM public.ecr.aws/docker/library/python:3.12-slim-trixie@sha256:05cda9777409a9c3ffddd94a4c476b79f0769a0b4857f0c7ed9226b6800b0d6f
+
+# The handler calls /opt/bin/ffmpeg (the old layer path), so it is unchanged.
+COPY --from=ffmpeg-build /opt/ffmpeg/bin/ffmpeg /opt/bin/ffmpeg
 
 WORKDIR /var/task
 

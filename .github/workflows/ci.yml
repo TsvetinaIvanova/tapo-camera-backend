@@ -74,8 +74,18 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - uses: docker/setup-buildx-action@v4
+
+      # GitHub Actions cache: the ffmpeg compile stage (~6 min) is reused
+      # unless the Dockerfile's build stage changes.
       - name: Build image
-        run: docker build -t tapo-clip-processor:ci terraform/lambda/processor
+        uses: docker/build-push-action@v7
+        with:
+          context: terraform/lambda/processor
+          tags: tapo-clip-processor:ci
+          load: true
+          cache-from: type=gha,scope=processor
+          cache-to: type=gha,mode=max,scope=processor
 
       - name: Smoke test
         run: terraform/lambda/processor/smoke-test.sh tapo-clip-processor:ci
