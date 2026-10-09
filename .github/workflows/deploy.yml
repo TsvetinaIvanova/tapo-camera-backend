@@ -105,12 +105,26 @@ jobs:
       - name: Report scan findings
         run: |
           REPO="${REPO_URL#*/}"
-          aws ecr wait image-scan-complete --repository-name "$REPO" --image-id imageTag="$TAG"
+          IMAGE_ID="imageTag=$TAG"
+          # The scan record appears a few seconds after the push, and the
+          # waiter fails (rather than waits) on ScanNotFoundException. Poll
+          # until it exists; fail loudly if it never does (scan-on-push broken).
+          for i in $(seq 1 30); do
+            if aws ecr describe-image-scan-findings --repository-name "$REPO" --image-id "$IMAGE_ID" >/dev/null 2>&1; then
+              break
+            fi
+            if [ "$i" -eq 30 ]; then
+              echo "::error::No scan found for $TAG after 5 minutes; check the repository/registry scanning configuration"
+              exit 1
+            fi
+            sleep 10
+          done
+          aws ecr wait image-scan-complete --repository-name "$REPO" --image-id "$IMAGE_ID"
           {
             echo "### Processor image \`$TAG\`"
             echo "ECR basic scan findings by severity:"
             echo '```json'
-            aws ecr describe-image-scan-findings --repository-name "$REPO" --image-id imageTag="$TAG" \
+            aws ecr describe-image-scan-findings --repository-name "$REPO" --image-id "$IMAGE_ID" \
               --query 'imageScanFindings.findingSeverityCounts' --output json
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
