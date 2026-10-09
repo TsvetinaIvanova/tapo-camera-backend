@@ -29,6 +29,7 @@ Imported by CLAUDE.md. Update this file when a decision is made or a backlog ite
 - `config.yaml.example` is out of date: add per-camera `interval_seconds`, `night_mode`, and `poller.cloudwatch_log_group`. Placeholder passwords only.
 - In the real config, C660 `night_mode.interval_seconds: 3200` was commented as "1h" (3600 would be exact) and `start_hour: 22` was commented as 21:00. Fix whichever side is wrong.
 - `ci.yml` test job has `continue-on-error: true` ("tests/ directory to be created"), so tests never gate a merge. Add real tests or remove the job; a check that can't fail is misleading.
+- Thumbnails are full camera resolution (C660: 3840x2160, about 1.3 MB per JPEG). Scaling in the ffmpeg command (e.g. `-vf scale=640:-2`) would cut S3 storage and frontend load time, and is a one-line handler change.
 - Terraform backend already migrated to `use_lockfile = true` (no `dynamodb_table`). If the old `tapo-tf-state-lock` DynamoDB table still exists, delete it.
 
 ## Next up: Terraform cleanup (agreed 2026-10-06)
@@ -50,7 +51,11 @@ Review done; work in this order, one small PR each, every PR with a `plan` attac
    - First scan (2026-10-08): 1 critical, 15 high, all in ffmpeg's transitive libraries or the base (libtiff, librsvg, jpeg-xl, libxml2, cJSON, expat, zlib), none in ffmpeg itself. Debian has no fixed versions yet, so a rebuild doesn't clear them. The processor only decodes our own H.264/H.265 clips to JPEG, so these code paths aren't reached. That makes them low real risk, but they're permanent scanner noise. That led to the minimal build below.
    - **Minimal source-built ffmpeg** (PR `processor-minimal-ffmpeg`): FFmpeg 9.0.2 from the GPG-verified tarball (release key `FCF9 86EA 15E6 E293 A564 4F10 B432 2F04 D676 58D8`), pinned by SHA-256 via `ADD --checksum`. `--disable-everything` plus: file protocol, mov demuxer, h264/hevc parsers and decoders, mjpeg encoder, image2 muxer, scale filter. Static, LGPL-only (no `--enable-gpl`), 7.5 MB, links only libc/libm; the image is 258 MB. Smoke test uses committed synthetic fixtures (`testdata/`, H.264+AAC and HEVC+AAC) because this ffmpeg can't encode. CI caches the compile stage (GitHub Actions cache).
    - **Accepted tradeoff:** ECR scanning only sees OS packages, so it can't see this ffmpeg, and Dependabot can't bump it. Track it by hand: watch FFmpeg security releases (https://ffmpeg.org/security.html), and to bump, verify the new tarball's signature and update `FFMPEG_VERSION` and `FFMPEG_SHA256`. Its exposure is small (two decoders plus one demuxer, and only our own clips as input), but H.264/HEVC decoders are frequent CVE sources, so don't let it go stale. Option: a scheduled workflow that opens an issue when a newer 9.0.x appears.
-   - Before 4b: run the image's ffmpeg against one real Tapo clip per camera model. The synthetic fixtures may not cover every stream feature the cameras produce.
+   - Real-clip check (2026-10-09, clips deleted afterwards), run with Lambda-like limits (512 MB, 0.3 vCPU):
+     - Cameras produce C225 H.264 High 2560x1440; C325 H.264 Main 2688x1520, full-range `yuvj420p`; C660 **HEVC `hev1` 3840x2160**. All have mono AAC audio.
+     - Minimal image: thumbnails 1.2 s / 1.5 s / 4.5 s, all on the first attempt (no fallback), and full decodes of every clip succeed.
+     - The `SEI type 764 truncated` messages on the H.264 cameras are vendor SEI that ffmpeg doesn't recognize. They're identical with Debian's ffmpeg and harmless.
+     - Debian's ffmpeg was OOM-killed fully decoding the 4K HEVC clip at 512 MB; the minimal build was not.
    - 4b: module support for image functions, then switch the processor to the image by digest. Zip→image forces function replacement: apply with `tapo-poller` paused, and have a backfill script ready for clips uploaded in the gap. Add an ECR repository policy for Lambda, and a weekly scheduled rebuild so Debian fixes flow in.
    - 4c: remove the layer reference and the `LambdaLayers` statement from the CI role; update docs.
 
