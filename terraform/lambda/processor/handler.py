@@ -36,6 +36,9 @@ TTL_DAYS = int(os.environ.get("TTL_DAYS", "365"))
 table = dynamodb.Table(TABLE_NAME)
 
 FFMPEG_PATH = "/opt/bin/ffmpeg"   # provided by the Lambda layer
+# Thumbnails only need to fill a frontend card; full camera resolution
+# (up to 3840px on the C660) made them ~1.3 MB each.
+THUMBNAIL_MAX_WIDTH = 1024
 TMP_DIR = "/tmp"
 
 
@@ -92,7 +95,8 @@ def download_clip(bucket: str, s3_key: str, local_path: str) -> int:
 
 def generate_thumbnail(clip_path: str, thumbnail_path: str) -> bool:
     """
-    Extract a single frame at 1 second into the clip as a JPEG.
+    Extract a single frame at 1 second into the clip as a JPEG, scaled
+    down to THUMBNAIL_MAX_WIDTH (never up), keeping the aspect ratio.
     Falls back to frame 0 if the clip is shorter than 1 second.
     Returns True on success.
     """
@@ -101,6 +105,8 @@ def generate_thumbnail(clip_path: str, thumbnail_path: str) -> bool:
         "-ss", "1",           # seek to 1 second
         "-i", clip_path,
         "-vframes", "1",      # extract exactly one frame
+        # Width capped, never upscaled; -2 keeps the aspect ratio with an even height
+        "-vf", f"scale='min({THUMBNAIL_MAX_WIDTH},iw)':-2",
         "-q:v", "12",          # JPEG quality (1=best, 31=worst)
         "-y",                 # overwrite if exists
         thumbnail_path,

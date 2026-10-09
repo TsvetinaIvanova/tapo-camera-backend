@@ -29,7 +29,6 @@ Imported by CLAUDE.md. Update this file when a decision is made or a backlog ite
 - `config.yaml.example` is out of date: add per-camera `interval_seconds`, `night_mode`, and `poller.cloudwatch_log_group`. Placeholder passwords only.
 - In the real config, C660 `night_mode.interval_seconds: 3200` was commented as "1h" (3600 would be exact) and `start_hour: 22` was commented as 21:00. Fix whichever side is wrong.
 - `ci.yml` test job has `continue-on-error: true` ("tests/ directory to be created"), so tests never gate a merge. Add real tests or remove the job; a check that can't fail is misleading.
-- Thumbnails are full camera resolution (C660: 3840x2160, about 1.3 MB per JPEG). Scaling in the ffmpeg command (e.g. `-vf scale=640:-2`) would cut S3 storage and frontend load time, and is a one-line handler change.
 - Terraform backend already migrated to `use_lockfile = true` (no `dynamodb_table`). If the old `tapo-tf-state-lock` DynamoDB table still exists, delete it.
 
 ## Next up: Terraform cleanup (agreed 2026-10-06)
