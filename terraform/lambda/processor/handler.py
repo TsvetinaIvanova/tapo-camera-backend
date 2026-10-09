@@ -38,7 +38,7 @@ table = dynamodb.Table(TABLE_NAME)
 FFMPEG_PATH = "/opt/bin/ffmpeg"   # provided by the Lambda layer
 # Thumbnails only need to fill a frontend card; full camera resolution
 # (up to 3840px on the C660) made them ~1.3 MB each.
-THUMBNAIL_MAX_WIDTH = 1024
+THUMBNAIL_MAX_WIDTH = 1280
 TMP_DIR = "/tmp"
 
 
