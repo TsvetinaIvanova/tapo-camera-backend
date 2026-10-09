@@ -17,3 +17,7 @@ output "role_name" {
 output "log_group_name" {
   value = aws_cloudwatch_log_group.this.name
 }
+
+output "package_type" {
+  value = aws_lambda_function.this.package_type
+}

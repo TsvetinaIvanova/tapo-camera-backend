@@ -57,9 +57,11 @@ Review done; work in this order, one small PR each, every PR with a `plan` attac
      - Debian's ffmpeg was OOM-killed fully decoding the 4K HEVC clip at 512 MB; the minimal build was not.
    - Thumbnails capped at 1280 px wide (PR #23; `THUMBNAIL_MAX_WIDTH`, never upscales). Verified on both the minimal image and the old layer. Existing full-size thumbnails just expire.
    - Scan after the minimal build (2026-10-09): **1 HIGH (zlib, base image)**, down from 1 critical, 15 high, 7 medium and 1 low. Dependabot picks up the fix once Debian ships it.
-   - 4b: module support for image functions, then switch the processor to the image by digest. Also: an ECR repository policy for Lambda, and a weekly scheduled rebuild so Debian base fixes flow in.
-     - Zip→image forces function replacement, and S3 events during the gap are lost. Apply while nothing uploads (pause `tapo-poller`, or during a camera/internet outage), and have a backfill script ready (re-invoke the processor for clips with no DynamoDB row).
-     - Doesn't need live cameras to verify: invoke the new function with a synthetic S3 `ObjectCreated` event for an existing clip key; it just regenerates that clip's thumbnail and metadata.
+   - 4b prep (PR `processor-image-prep`, no behavior change): `modules/lambda` supports `image_uri` (digest-pinned, validated) besides `source_file`; ECR repository policy lets only `tapo-clip-processor` pull; `scripts/backfill_processor.py`.
+   - 4b switch (PR `processor-image-switch`): processor uses the image by digest; `deploy.yml` builds/pushes the image before `terraform apply`. Runbook in the PR.
+   - No weekly scheduled rebuild (dropped from the plan): with the minimal build every input is pinned (base digest, ffmpeg tarball hash, pip versions), so a rebuild produces the same image. Updates arrive as Dependabot PRs or a manual `FFMPEG_VERSION` bump, then deploy.
+     - Zip→image forces function replacement, and S3 events during the gap are lost. Apply while nothing uploads (pause `tapo-poller`, or during a camera/internet outage), then run `scripts/backfill_processor.py --since <date> [--invoke]`. It re-invokes the processor for clips whose row is missing or not `complete`; it's a dry run by default.
+     - Doesn't need live cameras to verify: `scripts/backfill_processor.py --key <existing clip> --invoke` sends a synthetic S3 `ObjectCreated` event; it just regenerates that clip's thumbnail and metadata.
      - The lifecycle keeps 5 images; make sure the function's digest is always one of them (it is, as long as each deploy updates the function).
    - 4c: remove the layer reference and the `LambdaLayers` statement from the CI role; update docs.
 
@@ -71,7 +73,7 @@ Known and accepted: `aws_iam_access_key` and `random_password` put secrets in tf
 Settled; don't re-litigate. Small leftovers from "Small cleanups" can be slotted in anywhere.
 
 1. **Finish the processor image migration (4b, then 4c above).** Until then the function still runs the 2019 third-party layer, and the image is built but unused, which is the worst state of the migration.
-2. **Real tests.** The CI `Test` job has `continue-on-error: true` and there is no `tests/` directory, so a green check tests nothing. Add pytest + moto unit tests for `parse_s3_key` and the processor flow, the query Lambda and the authorizer (constant-time compare, missing/wrong key). Then remove `continue-on-error` so the gate is real before behavior-changing work.
+2. **Real tests.** The CI `Test` job has `continue-on-error: true` and there is no `tests/` directory, so a green check tests nothing. Known bug for a first test: `download_clip` never returns the file size, so every row has `file_size_bytes = null`. Add pytest + moto unit tests for `parse_s3_key` and the processor flow, the query Lambda and the authorizer (constant-time compare, missing/wrong key). Then remove `continue-on-error` so the gate is real before behavior-changing work.
 3. **GDPR decision for C660** (public road in frame): privacy mask in the Tapo app and/or signage, plus what a public demo may show. Blocks making the repo or a demo public, which a portfolio project needs. Partly non-technical, so it may be quick.
 4. **SLOs and error budgets.** SLIs: poll success ratio per camera (`PollCycleCompleted` vs `PollCycleErrors`), and clip freshness. Burn-rate alarms and a dashboard.
 5. **Agentic AI layer**, starting with the incident-response agent, **triggered by the SLO burn alerts** and investigating with the same metrics and logs. It comes after SLOs because the agent is only as good as the signals it reasons over. Natural-language query agent later.

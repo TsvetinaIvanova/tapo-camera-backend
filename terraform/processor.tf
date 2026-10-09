@@ -113,6 +113,29 @@ resource "aws_ecr_repository" "processor" {
   }
 }
 
+# Lambda pulls the image with its service principal. Managed here so it's
+# reviewable and doesn't drift: otherwise Lambda adds a statement itself
+# when the function is created. Scoped to this one function.
+resource "aws_ecr_repository_policy" "processor" {
+  repository = aws_ecr_repository.processor.name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid       = "LambdaImagePull"
+      Effect    = "Allow"
+      Principal = { Service = "lambda.amazonaws.com" }
+      Action    = ["ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer"]
+      Condition = {
+        # Unqualified ARN, or this function with a version/alias qualifier
+        StringLike = {
+          "aws:sourceArn" = [module.processor.arn, "${module.processor.arn}:*"]
+        }
+      }
+    }]
+  })
+}
+
 resource "aws_ecr_lifecycle_policy" "processor" {
   repository = aws_ecr_repository.processor.name
 
