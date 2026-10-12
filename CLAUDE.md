@@ -23,7 +23,7 @@ terraform/         main stack, flat, one file per component:
                    clips.tf (clips bucket + DynamoDB)  processor.tf (Lambda + IAM + S3 trigger)
                    api.tf (HTTP API + query and authorizer Lambdas)  frontend.tf  poller.tf (IAM user)
                    monitoring.tf
-terraform/modules/lambda/  generic Python Lambda: zip, role + basic execution, log group, function.
+terraform/modules/lambda/  generic Python Lambda: single-file zip or digest-pinned container image, role + basic execution, log group, function.
                    Per-function least-privilege policies stay in the caller (attached to module.<x>.role_name)
 terraform/bootstrap/  separate state: GitHub OIDC provider + CI plan/apply roles; applied locally by admin, never from CI
 terraform/lambda/  processor/handler.py  query/handler.py  authorizer/handler.py

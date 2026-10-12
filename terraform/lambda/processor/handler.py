@@ -35,7 +35,7 @@ TTL_DAYS = int(os.environ.get("TTL_DAYS", "365"))
 
 table = dynamodb.Table(TABLE_NAME)
 
-FFMPEG_PATH = "/opt/bin/ffmpeg"   # provided by the Lambda layer
+FFMPEG_PATH = "/opt/bin/ffmpeg"   # built into the container image (see Dockerfile)
 # Thumbnails only need to fill a frontend card; full camera resolution
 # (up to 3840px on the C660) made them ~1.3 MB each.
 THUMBNAIL_MAX_WIDTH = 1280

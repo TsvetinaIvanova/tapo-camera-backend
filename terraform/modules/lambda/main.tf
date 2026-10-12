@@ -64,7 +64,6 @@ resource "aws_lambda_function" "this" {
   filename         = local.is_image ? null : data.archive_file.this[0].output_path
   source_code_hash = local.is_image ? null : data.archive_file.this[0].output_base64sha256
 
-  layers      = var.layers
   timeout     = var.timeout
   memory_size = var.memory_size
 
@@ -81,10 +80,6 @@ resource "aws_lambda_function" "this" {
     precondition {
       condition     = (var.source_file == null) != (var.image_uri == null)
       error_message = "Set exactly one of source_file (zip) or image_uri (container image)."
-    }
-    precondition {
-      condition     = !local.is_image || length(var.layers) == 0
-      error_message = "Layers can't be used with image functions; build dependencies into the image."
     }
   }
 }

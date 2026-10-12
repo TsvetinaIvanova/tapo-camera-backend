@@ -55,12 +55,6 @@ variable "environment" {
   default     = {}
 }
 
-variable "layers" {
-  description = "Layer ARNs (zip packaging only; Lambda doesn't allow layers on image functions)"
-  type        = list(string)
-  default     = []
-}
-
 variable "log_retention_days" {
   description = "CloudWatch log retention in days"
   type        = number
