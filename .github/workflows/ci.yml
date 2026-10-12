@@ -98,6 +98,10 @@ jobs:
   # ── Terraform validate & plan ───────────────────────────
   tf-plan:
     name: Terraform plan
+    # Dependabot PRs can't read Actions secrets, so the OIDC login has no
+    # role to assume. Its bumps (pip pins, image base digest) don't affect
+    # the plan, so skip the job rather than give bot PRs AWS credentials.
+    if: github.actor != 'dependabot[bot]'
     runs-on: ubuntu-latest
     permissions:
       id-token: write   # required for OIDC
