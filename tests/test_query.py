@@ -131,13 +131,15 @@ def test_dynamodb_error_is_a_500_without_details(handler, monkeypatch):
     assert get(handler, date="20261008") == (500, {"error": "Internal server error"})
 
 
-@pytest.mark.xfail(strict=True, reason="known bug: the handler logs the whole event, including the x-api-key header")
 def test_api_key_is_not_logged(handler, caplog):
     event = {
         "headers": {"x-api-key": SECRET},
-        "queryStringParameters": {"date": "20261008"},
+        "queryStringParameters": {"date": "20261008", "camera": "c325_back"},
     }
     with caplog.at_level(logging.INFO):
         handler.lambda_handler(event, None)
 
     assert SECRET not in caplog.text
+    assert "x-api-key" not in caplog.text
+    # The query itself is still logged, for debugging.
+    assert "20261008" in caplog.text and "c325_back" in caplog.text

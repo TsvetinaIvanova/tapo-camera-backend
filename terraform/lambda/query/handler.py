@@ -107,9 +107,10 @@ def response(status_code: int, body: dict) -> dict:
 
 
 def lambda_handler(event: dict, context) -> dict:
-    logger.info(f"Event: {json.dumps(event)}")
-
+    # Log only the query parameters: the full event carries the request
+    # headers, and with them the x-api-key secret.
     params = event.get("queryStringParameters") or {}
+    logger.info(f"Query parameters: {json.dumps(params)}")
     date = params.get("date")
     camera_id = params.get("camera")
 

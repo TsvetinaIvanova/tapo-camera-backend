@@ -74,7 +74,7 @@ def test_comparison_is_constant_time(handler, secret, monkeypatch):
 
     authorize(handler, {"x-api-key": "wrong"})
 
-    assert compared == [("wrong", SECRET)]
+    assert compared == [(b"wrong", SECRET.encode())]
 
 
 def test_secret_is_fetched_decrypted_and_cached(handler, secret, ssm_calls):
@@ -103,6 +103,5 @@ def test_keys_are_not_logged(handler, secret, caplog):
     assert "wrong-guess" not in caplog.text
 
 
-@pytest.mark.xfail(strict=True, reason="known bug: hmac.compare_digest raises TypeError on non-ASCII strings")
 def test_non_ascii_key_is_denied(handler, secret):
     assert authorize(handler, {"x-api-key": "pässword"}) == {"isAuthorized": False}
