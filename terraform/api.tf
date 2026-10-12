@@ -5,8 +5,13 @@ resource "aws_apigatewayv2_api" "tapo" {
   protocol_type = "HTTP"
 
   cors_configuration {
+    # The frontend bucket is reachable at two origins: the website endpoint
+    # (HTTP only) and the regional REST endpoint (HTTPS, /index.html).
     allow_origins = concat(
-      ["http://${aws_s3_bucket_website_configuration.frontend.website_endpoint}"],
+      [
+        "http://${aws_s3_bucket_website_configuration.frontend.website_endpoint}",
+        "https://${aws_s3_bucket.frontend.bucket_regional_domain_name}",
+      ],
       var.api_cors_extra_origins,
     )
     allow_methods = ["GET", "OPTIONS"]

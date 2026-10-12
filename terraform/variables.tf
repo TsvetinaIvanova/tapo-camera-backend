@@ -44,7 +44,7 @@ variable "alert_email" {
 }
 
 variable "api_cors_extra_origins" {
-  description = "Origins allowed to call the API besides the S3 website (e.g. local frontend dev server)"
+  description = "Origins allowed to call the API besides the frontend bucket's two endpoints (e.g. local frontend dev server)"
   type        = list(string)
   default     = ["http://localhost:8000"]
 }
