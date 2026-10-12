@@ -31,7 +31,6 @@ Imported by CLAUDE.md. Update this file when a decision is made or a backlog ite
 - `config.yaml.example` is out of date: add per-camera `interval_seconds`, `night_mode`, and `poller.cloudwatch_log_group`. Placeholder passwords only.
 - In the real config, C660 `night_mode.interval_seconds: 3200` was commented as "1h" (3600 would be exact) and `start_hour: 22` was commented as 21:00. Fix whichever side is wrong.
 - Terraform backend already migrated to `use_lockfile = true` (no `dynamodb_table`). If the old `tapo-tf-state-lock` DynamoDB table still exists, delete it.
-- The frontend calls the API with a double slash (`…amazonaws.com//clips`): the `api_endpoint` output is the stage's `invoke_url`, which ends with `/`, and `index.html` appends `/clips` to `apiBase`. It works today, but tidy it in one place: strip the trailing slash from `apiBase` in the frontend (also covers a hand-written local `config.json`), or `trimsuffix` the output.
 
 ## Terraform cleanup (agreed 2026-10-06; all four steps done)
 
