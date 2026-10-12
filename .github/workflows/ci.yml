@@ -40,6 +40,9 @@ jobs:
       - name: Lint lambdas
         run: flake8 terraform/lambda/ --max-line-length=140 --exclude=__pycache__
 
+      - name: Lint scripts
+        run: flake8 scripts/ --max-line-length=140 --exclude=__pycache__
+
   test:
     name: Test
     runs-on: ubuntu-latest
