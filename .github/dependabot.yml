@@ -1,5 +1,6 @@
 # Keeps the processor image's pins current: the digest-pinned base image
 # (which also carries Debian security updates) and the pinned pip packages.
+# Also the test dependencies in /requirements-dev.txt.
 version: 2
 updates:
   - package-ecosystem: docker
@@ -9,5 +10,10 @@ updates:
 
   - package-ecosystem: pip
     directory: /terraform/lambda/processor
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: pip
+    directory: /
     schedule:
       interval: weekly

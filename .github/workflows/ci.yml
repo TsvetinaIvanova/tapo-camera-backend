@@ -43,6 +43,9 @@ jobs:
       - name: Lint scripts
         run: flake8 scripts/ --max-line-length=140 --exclude=__pycache__
 
+      - name: Lint tests
+        run: flake8 tests/ --max-line-length=140 --exclude=__pycache__
+
   test:
     name: Test
     runs-on: ubuntu-latest
@@ -62,12 +65,11 @@ jobs:
           restore-keys: ${{ runner.os }}-pip-
 
       - name: Install dependencies
-        run: pip install pytest boto3 pyyaml moto
+        run: pip install -r requirements-dev.txt
 
+      # moto mocks AWS in-process; no credentials are needed or used.
       - name: Run tests
-        run: python -m pytest tests/ -v
-        # Note: tests/ directory to be created — skip gracefully if missing
-        continue-on-error: true
+        run: python -m pytest -v
 
   # ── Processor image: build + smoke test (no AWS) ────────
   processor-image:
