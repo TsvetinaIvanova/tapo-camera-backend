@@ -31,7 +31,7 @@ Imported by CLAUDE.md. Update this file when a decision is made or a backlog ite
 - `ci.yml` test job has `continue-on-error: true` ("tests/ directory to be created"), so tests never gate a merge. Add real tests or remove the job; a check that can't fail is misleading.
 - Terraform backend already migrated to `use_lockfile = true` (no `dynamodb_table`). If the old `tapo-tf-state-lock` DynamoDB table still exists, delete it.
 
-## Next up: Terraform cleanup (agreed 2026-10-06)
+## Terraform cleanup (agreed 2026-10-06; steps 1-3 done, step 4 in progress)
 
 Review done; work in this order, one small PR each, every PR with a `plan` attached. PRs #14 (repo hygiene) and #15 (random provider + fmt) should be merged first.
 
@@ -44,7 +44,7 @@ Review done; work in this order, one small PR each, every PR with a `plan` attac
    - Delete `removed.tf` (already applied).
 2. **Regroup files by component (zero-diff)** (done in PR `terraform-regroup`): `clips.tf` (clips bucket + DynamoDB), `processor.tf` (Lambda + IAM + S3 trigger), `api.tf` (query + authorizer Lambdas, API Gateway, their IAM), `frontend.tf`, `poller.tf` (IAM user/policies/key), `monitoring.tf`; all variables in `variables.tf`, all outputs in `outputs.tf` (keep output names: `deploy.yml` uses them). Then update the CLAUDE.md layout section (also add `bootstrap/`). Plan must show no changes.
 3. **`modules/lambda`** (done in PR `terraform-lambda-module`): archive + role + basic policy + log group + function. 12 `moved {}` blocks in `moved.tf`; the plan shows 12 moves and 0 changes. Least-privilege policies deliberately stay in the callers. `moved` blocks rather than `terraform state mv`: `deploy.yml` auto-applies on push to `main`, so moving state outside the pipeline would leave a window where an apply plans to destroy and recreate everything; `moved` blocks are reviewed in the PR and applied atomically. `moved.tf` deleted after apply (PR `terraform-post-module-cleanup`).
-4. **ffmpeg layer → container image** (in progress). The current layer (account `175033217214`, `ffmpeg:1`) is from June 2019: an unpatched ffmpeg of unknown provenance and license, which its owner can delete or unshare (breaking the next apply that touches the function). Layer versions are immutable, so the risk is staleness, provenance and availability, not code swapping. Chosen: package the processor as a container image in ECR (also covers the GitHub Actions ECR/OIDC learning goal). Build-from-source minimal ffmpeg was considered and skipped.
+4. **ffmpeg layer → container image** (4a done, the function still runs on the old layer; 4b/4c are next). The current layer (account `175033217214`, `ffmpeg:1`) is from June 2019: an unpatched ffmpeg of unknown provenance and license, which its owner can delete or unshare (breaking the next apply that touches the function). Layer versions are immutable, so the risk is staleness, provenance and availability, not code swapping. Chosen: package the processor as a container image in ECR (also covers the GitHub Actions ECR/OIDC learning goal). Started with Debian's ffmpeg, then switched to a minimal source build (below) after the first scan.
    - ~~ffmpeg from Debian packages~~ (4a, superseded): visible to ECR scanning and patched by Debian, but at ~875 MB it pulled in libtiff, librsvg, libxml2 and similar, which produced every scan finding below.
    - 4a (PR `processor-image-ecr`): ECR repo (immutable tags, scan on push, keep 5 images), Dockerfile + smoke test (handler's `generate_thumbnail` on synthetic H.264/H.265), CI build on PRs, deploy pushes after apply and reports scan findings, Dependabot for base digest and pip pins. CI apply role gets `ecr:*` on `repository/tapo-*` (bootstrap; apply before merging).
    - First scan (2026-10-08): 1 critical, 15 high, all in ffmpeg's transitive libraries or the base (libtiff, librsvg, jpeg-xl, libxml2, cJSON, expat, zlib), none in ffmpeg itself. Debian has no fixed versions yet, so a rebuild doesn't clear them. The processor only decodes our own H.264/H.265 clips to JPEG, so these code paths aren't reached. That makes them low real risk, but they're permanent scanner noise. That led to the minimal build below.
@@ -55,21 +55,33 @@ Review done; work in this order, one small PR each, every PR with a `plan` attac
      - Minimal image: thumbnails 1.2 s / 1.5 s / 4.5 s, all on the first attempt (no fallback), and full decodes of every clip succeed.
      - The `SEI type 764 truncated` messages on the H.264 cameras are vendor SEI that ffmpeg doesn't recognize. They're identical with Debian's ffmpeg and harmless.
      - Debian's ffmpeg was OOM-killed fully decoding the 4K HEVC clip at 512 MB; the minimal build was not.
-   - 4b: module support for image functions, then switch the processor to the image by digest. Zip→image forces function replacement: apply with `tapo-poller` paused, and have a backfill script ready for clips uploaded in the gap. Add an ECR repository policy for Lambda, and a weekly scheduled rebuild so Debian fixes flow in.
+   - Thumbnails capped at 1280 px wide (PR #23; `THUMBNAIL_MAX_WIDTH`, never upscales). Verified on both the minimal image and the old layer. Existing full-size thumbnails just expire.
+   - Scan after the minimal build (2026-10-09): **1 HIGH (zlib, base image)**, down from 1 critical, 15 high, 7 medium and 1 low. Dependabot picks up the fix once Debian ships it.
+   - 4b: module support for image functions, then switch the processor to the image by digest. Also: an ECR repository policy for Lambda, and a weekly scheduled rebuild so Debian base fixes flow in.
+     - Zip→image forces function replacement, and S3 events during the gap are lost. Apply while nothing uploads (pause `tapo-poller`, or during a camera/internet outage), and have a backfill script ready (re-invoke the processor for clips with no DynamoDB row).
+     - Doesn't need live cameras to verify: invoke the new function with a synthetic S3 `ObjectCreated` event for an existing clip key; it just regenerates that clip's thumbnail and metadata.
+     - The lifecycle keeps 5 images; make sure the function's digest is always one of them (it is, as long as each deploy updates the function).
    - 4c: remove the layer reference and the `LambdaLayers` statement from the CI role; update docs.
 
 Not doing: splitting the main stack into multiple states. `bootstrap/` already provides the privilege-boundary split; more stacks would be overkill at ~100 resources.
 Known and accepted: `aws_iam_access_key` and `random_password` put secrets in tfstate. This is acceptable because the state bucket is encrypted and access-restricted.
 
-## Backlog (rough priority)
+## Agreed order of work (2026-10-09)
 
-1. **GDPR for C660** (public road in frame): privacy masking or signage. Do this before making the repo or a demo public.
-2. **SLO error budget tracking** (designed, not built): strongly relevant to SRE interviews. Candidate SLIs: poll success ratio per camera from `PollCycleCompleted` vs `PollCycleErrors`; clip freshness.
-3. **Rekognition person detection** (`has_person` defaults to `"unknown"`); no GSI needed, Scan + FilterExpression is fine at this scale.
-4. **Frontend improvements**: ideas pending from the user (upload current `index.html` first). Deferred: Rekognition label filter, date range picker.
-5. **Agentic AI layer** (incident-response agent, natural-language query agent): designed, not built.
-6. **GitHub Actions learning plan**: days 1-4 done; days 5-10 target AWS ECR/ECS via OIDC.
-7. Optional: Cognito or Roles Anywhere upgrades (see Decisions).
+Settled; don't re-litigate. Small leftovers from "Small cleanups" can be slotted in anywhere.
+
+1. **Finish the processor image migration (4b, then 4c above).** Until then the function still runs the 2019 third-party layer, and the image is built but unused, which is the worst state of the migration.
+2. **Real tests.** The CI `Test` job has `continue-on-error: true` and there is no `tests/` directory, so a green check tests nothing. Add pytest + moto unit tests for `parse_s3_key` and the processor flow, the query Lambda and the authorizer (constant-time compare, missing/wrong key). Then remove `continue-on-error` so the gate is real before behavior-changing work.
+3. **GDPR decision for C660** (public road in frame): privacy mask in the Tapo app and/or signage, plus what a public demo may show. Blocks making the repo or a demo public, which a portfolio project needs. Partly non-technical, so it may be quick.
+4. **SLOs and error budgets.** SLIs: poll success ratio per camera (`PollCycleCompleted` vs `PollCycleErrors`), and clip freshness. Burn-rate alarms and a dashboard.
+5. **Agentic AI layer**, starting with the incident-response agent, **triggered by the SLO burn alerts** and investigating with the same metrics and logs. It comes after SLOs because the agent is only as good as the signals it reasons over. Natural-language query agent later.
+
+## Backlog (rough priority, after the agreed order)
+
+1. **Rekognition person detection** (`has_person` defaults to `"unknown"`); no GSI needed, Scan + FilterExpression is fine at this scale.
+2. **Frontend improvements**: ideas pending from the user (upload current `index.html` first). Deferred: Rekognition label filter, date range picker.
+3. **GitHub Actions learning plan**: days 1-4 done; days 5-10 target AWS ECR/ECS via OIDC. ECR build/push via OIDC is already done for the processor image (step 4a); ECS remains.
+4. Optional: Cognito or Roles Anywhere upgrades (see Decisions).
 
 ## Handy commands
 
