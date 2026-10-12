@@ -1,18 +1,23 @@
 # ── Processor Lambda (S3 upload -> thumbnail + metadata) ────
 
-# Public layer maintained by serverless-ffmpeg project.
-# This ARN is for eu-central-1 — update if you use a different region.
-# Full list: https://github.com/nicholasgasior/aws-lambda-ffmpeg-layer
+# Container image (terraform/lambda/processor/Dockerfile: handler + minimal
+# source-built ffmpeg). deploy.yml builds, smoke-tests and pushes it, then
+# passes its digest to apply, so the function runs exactly the tested image.
+# Without that variable (PR plans, local plans), the newest image is used.
+data "aws_ecr_image" "processor" {
+  repository_name = aws_ecr_repository.processor.name
+  most_recent     = true
+}
+
 locals {
-  ffmpeg_layer_arn = "arn:aws:lambda:eu-central-1:175033217214:layer:ffmpeg:1"
+  processor_image_digest = coalesce(var.processor_image_digest, data.aws_ecr_image.processor.image_digest)
 }
 
 module "processor" {
   source = "./modules/lambda"
 
   function_name = "tapo-clip-processor"
-  source_file   = "${path.module}/lambda/processor/handler.py"
-  layers        = [local.ffmpeg_layer_arn]
+  image_uri     = "${aws_ecr_repository.processor.repository_url}@${local.processor_image_digest}"
 
   timeout     = 60  # seconds — thumbnail extraction is fast, but download may take a moment
   memory_size = 512 # MB — ffmpeg needs headroom; /tmp is 512MB by default
@@ -88,9 +93,14 @@ resource "aws_s3_bucket_notification" "clip_upload" {
   depends_on = [aws_lambda_permission.allow_s3]
 }
 
-# Permission for S3 to invoke the Lambda
+# Permission for S3 to invoke the Lambda.
+# statement_id was renamed (from AllowS3Invoke) when the function moved from
+# zip to image: that change replaces the function, which deletes its resource
+# policy, but this resource's inputs stayed the same, so Terraform wouldn't
+# have recreated it and S3 would silently have lost permission to invoke.
+# statement_id forces replacement, so the rename recreates it on the new function.
 resource "aws_lambda_permission" "allow_s3" {
-  statement_id  = "AllowS3Invoke"
+  statement_id  = "AllowS3InvokeProcessor"
   action        = "lambda:InvokeFunction"
   function_name = module.processor.function_name
   principal     = "s3.amazonaws.com"

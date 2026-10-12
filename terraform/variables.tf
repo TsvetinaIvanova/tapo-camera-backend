@@ -48,3 +48,14 @@ variable "api_cors_extra_origins" {
   type        = list(string)
   default     = ["http://localhost:8000"]
 }
+
+variable "processor_image_digest" {
+  description = "Digest (sha256:...) of the processor image to deploy; set by deploy.yml. Null means the newest image in ECR."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.processor_image_digest == null || can(regex("^sha256:[0-9a-f]{64}$", var.processor_image_digest))
+    error_message = "processor_image_digest must look like sha256:<64 hex>."
+  }
+}
