@@ -21,8 +21,13 @@ output "frontend_bucket" {
 }
 
 output "frontend_url" {
-  description = "Static website URL"
+  description = "Static website URL (HTTP only)"
   value       = "http://${aws_s3_bucket_website_configuration.frontend.website_endpoint}"
+}
+
+output "frontend_https_url" {
+  description = "Frontend over HTTPS, via the bucket's regional REST endpoint"
+  value       = "https://${aws_s3_bucket.frontend.bucket_regional_domain_name}/index.html"
 }
 
 output "api_shared_secret" {
