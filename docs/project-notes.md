@@ -28,7 +28,6 @@ Imported by CLAUDE.md. Update this file when a decision is made or a backlog ite
 
 - `config.yaml.example` is out of date: add per-camera `interval_seconds`, `night_mode`, and `poller.cloudwatch_log_group`. Placeholder passwords only.
 - In the real config, C660 `night_mode.interval_seconds: 3200` was commented as "1h" (3600 would be exact) and `start_hour: 22` was commented as 21:00. Fix whichever side is wrong.
-- `ci.yml` test job has `continue-on-error: true` ("tests/ directory to be created"), so tests never gate a merge. Add real tests or remove the job; a check that can't fail is misleading.
 - Terraform backend already migrated to `use_lockfile = true` (no `dynamodb_table`). If the old `tapo-tf-state-lock` DynamoDB table still exists, delete it.
 
 ## Terraform cleanup (agreed 2026-10-06; all four steps done)
@@ -73,7 +72,11 @@ Known and accepted: `aws_iam_access_key` and `random_password` put secrets in tf
 Settled; don't re-litigate. Small leftovers from "Small cleanups" can be slotted in anywhere.
 
 1. ~~Finish the processor image migration (4b, then 4c above).~~ Done 2026-10-12.
-2. **Real tests.** The CI `Test` job has `continue-on-error: true` and there is no `tests/` directory, so a green check tests nothing. Known bug for a first test: `download_clip` never returns the file size, so every row has `file_size_bytes = null`. Add pytest + moto unit tests for `parse_s3_key` and the processor flow, the query Lambda and the authorizer (constant-time compare, missing/wrong key). Then remove `continue-on-error` so the gate is real before behavior-changing work.
+2. **Real tests** (PR `real-tests`). pytest + moto unit tests in `tests/` for the three Lambda handlers: `parse_s3_key` and the processor flow (ffmpeg is faked at `subprocess.run`; the real binary is covered by the image smoke test), the query Lambda, and the authorizer (constant-time compare, missing/wrong key, fail closed, secret cache). `continue-on-error` is gone, so the `Test` job is a real gate. Pins in `requirements-dev.txt` (Dependabot bumps them). Not covered yet: the poller and `scripts/`.
+   - The "`file_size_bytes` is always null" bug noted earlier doesn't exist: `download_clip` returns the size and live rows have it. A test now pins that.
+   - Two bugs found while writing the tests, each pinned by a strict `xfail` test (the test fails CI as soon as the bug is fixed, so the marker has to be removed in the fix PR):
+     - **The query Lambda logs the whole request event, including the `x-api-key` header**, so the API secret is in the `/aws/lambda/tapo-clip-query` log group (confirmed 2026-10-12 by counting matching log lines, without printing them). Fix: log only the query parameters, then rotate the secret (`terraform apply -replace=random_password.api_shared_secret`) and delete the existing log streams (or let the 30-day retention expire them).
+     - The authorizer raises `TypeError` on a non-ASCII `x-api-key` (`hmac.compare_digest` only takes ASCII strings). API Gateway denies the request anyway, but as an unhandled error instead of a clean deny. Fix: compare bytes.
 3. **GDPR decision for C660** (public road in frame): privacy mask in the Tapo app and/or signage, plus what a public demo may show. Blocks making the repo or a demo public, which a portfolio project needs. Partly non-technical, so it may be quick.
 4. **SLOs and error budgets.** SLIs: poll success ratio per camera (`PollCycleCompleted` vs `PollCycleErrors`), and clip freshness. Burn-rate alarms and a dashboard.
 5. **Agentic AI layer**, starting with the incident-response agent, **triggered by the SLO burn alerts** and investigating with the same metrics and logs. It comes after SLOs because the agent is only as good as the signals it reasons over. Natural-language query agent later.
