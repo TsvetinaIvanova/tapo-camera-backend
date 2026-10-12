@@ -171,13 +171,6 @@ resource "aws_iam_role_policy" "github_actions_deploy" {
         Resource = "arn:aws:lambda:${local.region}:${local.account_id}:function:tapo-*"
       },
       {
-        # Attaching the public ffmpeg layer (another account) to a function
-        Sid      = "LambdaLayers"
-        Effect   = "Allow"
-        Action   = "lambda:GetLayerVersion"
-        Resource = "arn:aws:lambda:${local.region}:*:layer:*:*"
-      },
-      {
         # Processor image repository (create/manage, push images)
         Sid      = "ECRRepositories"
         Effect   = "Allow"
