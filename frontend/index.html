@@ -503,7 +503,9 @@
       const res = await fetch("config.json");
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const cfg = await res.json();
-      API_BASE = cfg.apiBase;
+      // The deployed value (API Gateway's invoke_url) ends with "/"; paths
+      // below start with one, so drop it to avoid "//clips".
+      API_BASE = (cfg.apiBase || "").replace(/\/+$/, "");
     } catch (err) {
       setStatus("Failed to load config — is config.json deployed?", "error");
       throw err;
