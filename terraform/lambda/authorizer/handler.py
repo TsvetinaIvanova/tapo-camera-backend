@@ -56,7 +56,8 @@ def lambda_handler(event: dict, context) -> dict:
         logger.error(f"Failed to fetch secret from SSM: {e}", exc_info=True)
         return {"isAuthorized": False}
 
-    is_authorized = hmac.compare_digest(provided, expected)
+    # Compared as bytes: compare_digest raises TypeError on non-ASCII strings.
+    is_authorized = hmac.compare_digest(provided.encode(), expected.encode())
 
     if not is_authorized:
         logger.info("Authorization denied — invalid x-api-key value")
