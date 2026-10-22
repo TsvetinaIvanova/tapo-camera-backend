@@ -16,7 +16,7 @@
 # because Dependabot only bumps literal FROM lines; it updates both together.
 
 # ── Build stage: minimal static ffmpeg ──────────────────────
-FROM public.ecr.aws/docker/library/python:3.12-slim-trixie@sha256:05cda9777409a9c3ffddd94a4c476b79f0769a0b4857f0c7ed9226b6800b0d6f AS ffmpeg-build
+FROM public.ecr.aws/docker/library/python:3.15-slim-trixie@sha256:f48fda6d59b2b3437781d1c3ccf4aa0e26ae871de3cdd758b49ab45ee7291619 AS ffmpeg-build
 
 # Source tarball pinned by SHA-256. The hash was taken after verifying the
 # tarball's GPG signature against the FFmpeg release signing key
@@ -52,7 +52,7 @@ RUN tar -xJf /tmp/ffmpeg.tar.xz --strip-components=1 \
     && cd / && rm -rf /tmp/ffmpeg /tmp/ffmpeg.tar.xz   # keep the cached layer small
 
 # ── Runtime stage ───────────────────────────────────────────
-FROM public.ecr.aws/docker/library/python:3.12-slim-trixie@sha256:05cda9777409a9c3ffddd94a4c476b79f0769a0b4857f0c7ed9226b6800b0d6f
+FROM public.ecr.aws/docker/library/python:3.15-slim-trixie@sha256:f48fda6d59b2b3437781d1c3ccf4aa0e26ae871de3cdd758b49ab45ee7291619
 
 # The handler calls /opt/bin/ffmpeg (the old layer path), so it is unchanged.
 COPY --from=ffmpeg-build /opt/ffmpeg/bin/ffmpeg /opt/bin/ffmpeg
