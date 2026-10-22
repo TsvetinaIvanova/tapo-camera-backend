@@ -59,23 +59,48 @@ resource "aws_iam_user_policy_attachment" "poller_upload" {
   policy_arn = aws_iam_policy.poller_upload.arn
 }
 
-# Scoped to only the tapo-poller log group — same least-privilege
-# pattern as the PutObject-only S3 policy already on this user.
+# The poller's log group. It was originally created by the poller itself
+# (watchtower, create_log_group=True), with its retention set by hand.
+# Imported so Terraform owns both, and so the IAM policy below can be
+# scoped to its ARN.
+import {
+  to = aws_cloudwatch_log_group.poller
+  id = "tapo-poller"
+}
+
+resource "aws_cloudwatch_log_group" "poller" {
+  name              = "tapo-poller"
+  retention_in_days = 14
+}
+
+# Scoped to only the poller's log group — same least-privilege pattern as
+# the PutObject-only S3 policy already on this user.
 resource "aws_iam_policy" "poller_logs" {
   name = "tapo-poller-cloudwatch-logs"
 
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [{
-      Sid    = "ShipPollerLogs"
-      Effect = "Allow"
-      Action = [
-        "logs:CreateLogGroup",
-        "logs:CreateLogStream",
-        "logs:PutLogEvents",
-      ]
-      Resource = "arn:aws:logs:${var.aws_region}:*:log-group:tapo-poller:*"
-    }]
+    Statement = [
+      {
+        Sid    = "ShipPollerLogs"
+        Effect = "Allow"
+        Action = [
+          "logs:CreateLogStream",
+          "logs:PutLogEvents",
+        ]
+        Resource = "${aws_cloudwatch_log_group.poller.arn}:*"
+      },
+      {
+        # Only because the deployed poller still calls CreateLogGroup at
+        # startup (the group exists, so the call is a no-op). Without it,
+        # watchtower fails and log shipping is silently disabled. Remove once
+        # the poller runs with create_log_group=False.
+        Sid      = "PollerStartupCreateLogGroup"
+        Effect   = "Allow"
+        Action   = ["logs:CreateLogGroup"]
+        Resource = aws_cloudwatch_log_group.poller.arn
+      },
+    ]
   })
 }
 

@@ -30,7 +30,7 @@ module "processor" {
   }
 }
 
-# ── IAM (beyond basic execution, which the module provides) ─
+# ── IAM (beyond logging, which the module provides) ─
 
 # Scoped S3 permissions:
 # - GetObject on clips/ (download the uploaded clip; also authorizes the
@@ -67,12 +67,9 @@ resource "aws_iam_role_policy" "lambda_dynamodb" {
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
-      Sid    = "WriteClipMetadata"
-      Effect = "Allow"
-      Action = [
-        "dynamodb:PutItem",
-        "dynamodb:UpdateItem"
-      ]
+      Sid      = "WriteClipMetadata"
+      Effect   = "Allow"
+      Action   = ["dynamodb:PutItem"]
       Resource = aws_dynamodb_table.camera_clips.arn
     }]
   })

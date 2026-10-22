@@ -1,4 +1,4 @@
-# Generic Python Lambda: execution role with basic logging only, a
+# Generic Python Lambda: execution role allowed only to write its own logs, a
 # Terraform-managed log group, and the function, packaged either as a
 # deterministic single-file zip (source_file) or a container image pinned
 # by digest (image_uri).
@@ -39,9 +39,25 @@ resource "aws_iam_role" "this" {
   })
 }
 
-resource "aws_iam_role_policy_attachment" "basic_execution" {
-  role       = aws_iam_role.this.name
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+# Logging scoped to this function's own log group. The AWS-managed
+# AWSLambdaBasicExecutionRole would allow writing to any log group in the
+# account. No CreateLogGroup: Terraform owns the group (below).
+resource "aws_iam_role_policy" "logs" {
+  name = "${var.function_name}-logs"
+  role = aws_iam_role.this.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid    = "WriteOwnLogs"
+      Effect = "Allow"
+      Action = [
+        "logs:CreateLogStream",
+        "logs:PutLogEvents",
+      ]
+      Resource = "${aws_cloudwatch_log_group.this.arn}:*"
+    }]
+  })
 }
 
 # Named from the variable, not the function resource, so it is created
@@ -74,7 +90,7 @@ resource "aws_lambda_function" "this" {
     }
   }
 
-  depends_on = [aws_cloudwatch_log_group.this]
+  depends_on = [aws_cloudwatch_log_group.this, aws_iam_role_policy.logs]
 
   lifecycle {
     precondition {
