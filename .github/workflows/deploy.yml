@@ -27,7 +27,6 @@ jobs:
       contents: read
 
     outputs:
-      repo_url: ${{ steps.repo.outputs.repo_url }}
       tag: ${{ steps.repo.outputs.tag }}
       digest: ${{ steps.push.outputs.digest }}
 
@@ -39,6 +38,7 @@ jobs:
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
+          mask-aws-account-id: true
 
       - name: Log in to ECR
         id: ecr
@@ -53,7 +53,6 @@ jobs:
           echo "TAG=$TAG" >> "$GITHUB_ENV"
           echo "REPO_URL=$REPO_URL" >> "$GITHUB_ENV"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "repo_url=$REPO_URL" >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-buildx-action@v4
 
@@ -107,6 +106,16 @@ jobs:
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
+          mask-aws-account-id: true
+
+      # The apply prints the poller's access key ID (not secret, but no reason
+      # to publish it).
+      - name: Mask access key IDs
+        run: |
+          for id in $(aws iam list-access-keys --user-name tapo-poller \
+              --query 'AccessKeyMetadata[].AccessKeyId' --output text); do
+            echo "::add-mask::$id"
+          done
 
       - name: Terraform init
         working-directory: terraform
@@ -137,7 +146,6 @@ jobs:
       contents: read
 
     env:
-      REPO_URL: ${{ needs.processor-image.outputs.repo_url }}
       TAG: ${{ needs.processor-image.outputs.tag }}
 
     steps:
@@ -146,11 +154,12 @@ jobs:
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
+          mask-aws-account-id: true
 
       # Report, don't gate: Debian always has some open low-severity CVEs.
       - name: Report scan findings
         run: |
-          REPO="${REPO_URL#*/}"
+          REPO=tapo-clip-processor
           IMAGE_ID="imageTag=$TAG"
           # The scan record appears a few seconds after the push, and the
           # waiter fails (rather than waits) on ScanNotFoundException. Poll
@@ -192,6 +201,7 @@ jobs:
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
+          mask-aws-account-id: true
 
       - name: Deploy frontend to S3
         run: |

@@ -121,6 +121,16 @@ jobs:
         with:
           role-to-assume: ${{ secrets.AWS_PLAN_ROLE_ARN }}
           aws-region: eu-central-1
+          mask-aws-account-id: true
+
+      # The plan prints the poller's access key ID (not secret, but no reason
+      # to publish it). Masked in logs here; redacted in the PR comment below.
+      - name: Mask access key IDs
+        run: |
+          for id in $(aws iam list-access-keys --user-name tapo-poller \
+              --query 'AccessKeyMetadata[].AccessKeyId' --output text); do
+            echo "::add-mask::$id"
+          done
 
       - name: Terraform init
         working-directory: terraform
@@ -139,14 +149,31 @@ jobs:
           terraform plan -no-color -lock-timeout=5m -out=tfplan 2>&1 | tee plan_output.txt
           echo "exitcode=${PIPESTATUS[0]}" >> $GITHUB_OUTPUT
 
-      # Post plan as a comment on PRs so you can review before merging
+      # Post plan as a comment on PRs so you can review before merging.
+      # Log masking doesn't apply to comments (the plan is read from a file),
+      # so the account ID, alert e-mail and access key IDs are redacted here.
       - name: Comment plan on PR
         if: github.event_name == 'pull_request'
         uses: actions/github-script@v7
+        env:
+          ALERT_EMAIL: ${{ secrets.TF_ALERT_EMAIL }}
         with:
           script: |
             const fs = require('fs');
-            const plan = fs.readFileSync('terraform/plan_output.txt', 'utf8');
+            const { execSync } = require('child_process');
+            const accountId = execSync(
+              'aws sts get-caller-identity --query Account --output text'
+            ).toString().trim();
+            let plan = fs.readFileSync('terraform/plan_output.txt', 'utf8');
+            // Literal replacements; skip empty values (split('') would
+            // split between every character).
+            for (const [value, label] of [
+              [accountId, '<account-id>'],
+              [process.env.ALERT_EMAIL, '<alert-email>'],
+            ]) {
+              if (value) plan = plan.split(value).join(label);
+            }
+            plan = plan.replace(/\b(AKIA|ASIA)[0-9A-Z]{16}\b/g, '<access-key-id>');
             const truncated = plan.length > 60000
               ? plan.slice(0, 60000) + '\n\n... (truncated)'
               : plan;
