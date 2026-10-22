@@ -23,9 +23,16 @@ variable "poller_user_name" {
 }
 
 variable "clips_ttl_days" {
-  description = "Number of days to keep clips in S3 and DynamoDB before automatic deletion"
+  description = "Number of days to keep clips and thumbnails in S3 and DynamoDB before automatic deletion"
   type        = number
-  default     = 120
+  default     = 60
+
+  # S3 rejects an expiration that isn't later than the STANDARD_IA transition
+  # at day 30, which IA also bills as its minimum storage duration.
+  validation {
+    condition     = var.clips_ttl_days > 30
+    error_message = "clips_ttl_days must be greater than 30 (the STANDARD_IA transition day)."
+  }
 }
 
 # Deliberately no default: this is the only alerting path, so a missing

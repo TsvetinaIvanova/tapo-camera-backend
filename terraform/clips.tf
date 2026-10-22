@@ -47,9 +47,25 @@ resource "aws_s3_bucket_lifecycle_configuration" "camera_clips" {
       storage_class = "STANDARD_IA"
     }
 
-    transition {
-      days          = 60
-      storage_class = "GLACIER"
+    expiration {
+      days = var.clips_ttl_days
+    }
+
+    # Deleted versions count toward how long footage is kept, so keep only a
+    # short undo window.
+    noncurrent_version_expiration {
+      noncurrent_days = 7
+    }
+  }
+
+  # Thumbnails are stills from the footage: same retention, no IA transition
+  # (they're small, and IA bills objects under 128 KB as 128 KB).
+  rule {
+    id     = "expire-thumbnails"
+    status = "Enabled"
+
+    filter {
+      prefix = "thumbnails/"
     }
 
     expiration {
@@ -57,7 +73,7 @@ resource "aws_s3_bucket_lifecycle_configuration" "camera_clips" {
     }
 
     noncurrent_version_expiration {
-      noncurrent_days = 30
+      noncurrent_days = 7
     }
   }
 }
