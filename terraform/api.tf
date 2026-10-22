@@ -77,10 +77,7 @@ resource "aws_iam_role_policy" "lambda_query_dynamodb" {
     Statement = [{
       Sid    = "ReadClipMetadata"
       Effect = "Allow"
-      Action = [
-        "dynamodb:Query",
-        "dynamodb:Scan",
-      ]
+      Action = ["dynamodb:Query"]
       Resource = [
         aws_dynamodb_table.camera_clips.arn,
         "${aws_dynamodb_table.camera_clips.arn}/index/*",

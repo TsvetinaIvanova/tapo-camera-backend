@@ -185,10 +185,14 @@ resource "aws_iam_role_policy" "github_actions_deploy" {
         Resource = "*"
       },
       {
-        Sid      = "Logs"
-        Effect   = "Allow"
-        Action   = "logs:*"
-        Resource = "arn:aws:logs:${local.region}:${local.account_id}:log-group:/aws/lambda/tapo-*"
+        Sid    = "Logs"
+        Effect = "Allow"
+        Action = "logs:*"
+        Resource = [
+          "arn:aws:logs:${local.region}:${local.account_id}:log-group:/aws/lambda/tapo-*",
+          "arn:aws:logs:${local.region}:${local.account_id}:log-group:tapo-poller",
+          "arn:aws:logs:${local.region}:${local.account_id}:log-group:tapo-poller:*",
+        ]
       },
       {
         Sid      = "Alarms"
@@ -273,7 +277,8 @@ resource "aws_iam_role_policy" "github_actions_deploy" {
         ]
       },
       {
-        # Only our own policies and Lambda's basic execution policy can be attached
+        # Only our own policies can be attached. (Lambda roles no longer use
+        # AWSLambdaBasicExecutionRole; modules/lambda scopes logging inline.)
         Sid    = "IAMAttach"
         Effect = "Allow"
         Action = [
@@ -287,7 +292,6 @@ resource "aws_iam_role_policy" "github_actions_deploy" {
         Condition = {
           ArnLike = {
             "iam:PolicyARN" = [
-              "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
               "arn:aws:iam::${local.account_id}:policy/tapo-*",
             ]
           }
