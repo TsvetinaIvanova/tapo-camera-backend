@@ -57,8 +57,14 @@ jobs:
       - uses: docker/setup-buildx-action@v4
 
       # Loaded locally (not pushed) so the smoke test runs before the push.
+      # No build record or job summary: the tag holds the ECR registry URL,
+      # so they would publish the AWS account ID unmasked (masking only
+      # applies to the log).
       - name: Build image
         uses: docker/build-push-action@v7
+        env:
+          DOCKER_BUILD_SUMMARY: false
+          DOCKER_BUILD_RECORD_UPLOAD: false
         with:
           context: terraform/lambda/processor
           tags: ${{ env.REPO_URL }}:${{ env.TAG }}
