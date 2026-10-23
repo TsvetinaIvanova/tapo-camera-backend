@@ -3,6 +3,7 @@ terraform/.terraform/
 terraform/bootstrap/.terraform/
 *.tfstate
 *.tfstate.*
+*.tfplan
 terraform/terraform.tfvars
 terraform/lambda/*/handler.zip
 

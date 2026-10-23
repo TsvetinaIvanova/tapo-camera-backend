@@ -185,6 +185,26 @@ resource "aws_iam_role_policy" "github_actions_deploy" {
         Resource = "*"
       },
       {
+        # ECR Public login, so base image pulls count against this account's
+        # quota instead of the runner IP's shared anonymous one (429s).
+        # Neither action supports resource-level scoping.
+        Sid      = "ECRPublicAuthToken"
+        Effect   = "Allow"
+        Action   = "ecr-public:GetAuthorizationToken"
+        Resource = "*"
+      },
+      {
+        Sid      = "ECRPublicBearerToken"
+        Effect   = "Allow"
+        Action   = "sts:GetServiceBearerToken"
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "sts:AWSServiceName" = "ecr-public.amazonaws.com"
+          }
+        }
+      },
+      {
         Sid    = "Logs"
         Effect = "Allow"
         Action = "logs:*"
