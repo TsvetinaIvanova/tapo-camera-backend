@@ -83,8 +83,13 @@ jobs:
 
       # GitHub Actions cache: the ffmpeg compile stage (~6 min) is reused
       # unless the Dockerfile's build stage changes.
+      # No build record or job summary, matching deploy.yml (nothing
+      # sensitive here, but the build is the same).
       - name: Build image
         uses: docker/build-push-action@v7
+        env:
+          DOCKER_BUILD_SUMMARY: false
+          DOCKER_BUILD_RECORD_UPLOAD: false
         with:
           context: terraform/lambda/processor
           tags: tapo-clip-processor:ci
