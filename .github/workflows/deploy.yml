@@ -44,6 +44,13 @@ jobs:
         id: ecr
         uses: aws-actions/amazon-ecr-login@v2
 
+      # The base image comes from ECR Public; logged-in pulls count against
+      # this account's quota, not the runner IP's shared anonymous one.
+      - name: Log in to ECR Public
+        uses: aws-actions/amazon-ecr-login@v2
+        with:
+          registry-type: public
+
       - name: Repository and tag
         id: repo
         run: |
@@ -60,7 +67,30 @@ jobs:
       # No build record or job summary: the tag holds the ECR registry URL,
       # so they would publish the AWS account ID unmasked (masking only
       # applies to the log).
+      # ECR Public rate-limits anonymous pulls per IP, and runners share IPs,
+      # so the base image's manifest fetch sometimes gets a 429. Retry once
+      # after a pause; a second failure fails the job.
       - name: Build image
+        id: build
+        continue-on-error: true
+        uses: docker/build-push-action@v7
+        env:
+          DOCKER_BUILD_SUMMARY: false
+          DOCKER_BUILD_RECORD_UPLOAD: false
+        with:
+          context: terraform/lambda/processor
+          tags: ${{ env.REPO_URL }}:${{ env.TAG }}
+          load: true
+          provenance: false # plain image manifest; Lambda and ECR basic scanning expect one
+          cache-from: type=gha,scope=processor
+          cache-to: type=gha,mode=max,scope=processor
+
+      - name: Wait before retrying the build
+        if: steps.build.outcome == 'failure'
+        run: sleep 60
+
+      - name: Build image (retry)
+        if: steps.build.outcome == 'failure'
         uses: docker/build-push-action@v7
         env:
           DOCKER_BUILD_SUMMARY: false
