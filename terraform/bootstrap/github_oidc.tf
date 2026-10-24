@@ -187,22 +187,18 @@ resource "aws_iam_role_policy" "github_actions_deploy" {
       {
         # ECR Public login, so base image pulls count against this account's
         # quota instead of the runner IP's shared anonymous one (429s).
-        # Neither action supports resource-level scoping.
-        Sid      = "ECRPublicAuthToken"
-        Effect   = "Allow"
-        Action   = "ecr-public:GetAuthorizationToken"
+        # Neither action supports resource-level scoping. No condition on
+        # sts:AWSServiceName: ECR Public checks the STS action internally
+        # without that key, so a condition on it always denies. Unconditioned
+        # is still narrow: a bearer token is useless without the issuing
+        # service's own permission (e.g. codeartifact:GetAuthorizationToken).
+        Sid    = "ECRPublicAuthToken"
+        Effect = "Allow"
+        Action = [
+          "ecr-public:GetAuthorizationToken",
+          "sts:GetServiceBearerToken",
+        ]
         Resource = "*"
-      },
-      {
-        Sid      = "ECRPublicBearerToken"
-        Effect   = "Allow"
-        Action   = "sts:GetServiceBearerToken"
-        Resource = "*"
-        Condition = {
-          StringEquals = {
-            "sts:AWSServiceName" = "ecr-public.amazonaws.com"
-          }
-        }
       },
       {
         Sid    = "Logs"
