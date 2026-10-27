@@ -56,6 +56,18 @@ variable "api_cors_extra_origins" {
   default     = ["http://localhost:8000"]
 }
 
+variable "demo_throttle_rate_limit" {
+  description = "Steady-state requests per second for the keyless GET /demo/clips route, shared by all callers"
+  type        = number
+  default     = 2
+}
+
+variable "demo_throttle_burst_limit" {
+  description = "Burst limit for the keyless GET /demo/clips route"
+  type        = number
+  default     = 10
+}
+
 variable "processor_image_digest" {
   description = "Digest (sha256:...) of the processor image to deploy; set by deploy.yml. Null means the newest image in ECR."
   type        = string

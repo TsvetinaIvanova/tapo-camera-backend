@@ -14,6 +14,12 @@ variable "source_file" {
   }
 }
 
+variable "zip_path" {
+  description = "Zip packaging: where to write the zip. Defaults to <source_file without .py>.zip; set it when two functions share one source file."
+  type        = string
+  default     = null
+}
+
 variable "image_uri" {
   description = "Image packaging: ECR image URI, pinned by digest (repo@sha256:...). Set this or source_file."
   type        = string

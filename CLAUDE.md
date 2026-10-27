@@ -10,7 +10,7 @@ Cameras (the names are used as `camera_id`, S3 prefixes and CloudWatch dimension
 - `c225_garage` 192.168.68.105 (wired, `timeCorrection=1`)
 - `c325_back` 192.168.68.103 (wired)
 - `c325_porch` 192.168.68.100 (wired)
-- `c660_street` 192.168.68.109 (battery-powered, outdoor, slow Wi-Fi, partially captures a public road)
+- `c660_street` 192.168.68.101 (battery-powered, outdoor, slow Wi-Fi, partially captures a public road)
 
 All cameras use the same Tapo camera account (`camera_admin`) and password. Third-party compatibility must stay enabled in the Tapo app.
 
@@ -42,7 +42,7 @@ docs/              project-notes.md (decisions, history, backlog)
 
 - S3: `vladaya-tapo-cameras` (`clips/{camera}/{YYYYMMDD}/...`, `thumbnails/...`), frontend bucket `vladaya-tapo-cameras-frontend`
 - DynamoDB: `tapo-camera-clips` (PK `camera_id`, SK `start_time`; GSI `date-start_time-index`)
-- Lambdas: `tapo-clip-processor`, `tapo-clip-query`, `tapo-api-authorizer`
+- Lambdas: `tapo-clip-processor`, `tapo-clip-query`, `tapo-clip-query-demo` (same code as query, `CAMERA_SCOPE=demo`, keyless `GET /demo/clips`), `tapo-api-authorizer`
 - Region `eu-central-1`; TF state in S3 `tapo-cameras-backend-tf-state` (S3-native locking, `use_lockfile = true`)
 - CloudWatch: namespace `Tapo/Camera`, log group `tapo-poller`, alarm `tapo-no-uploads-1h`, SNS topic `tapo-camera-alerts`
 - AWS profile on the Pi: `tapo-poller` (IAM user, deliberately kept as a long-lived least-privilege user)

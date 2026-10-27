@@ -11,7 +11,7 @@ locals {
 
   # Suffix swap rather than dirname(): dirname() normalizes "./x" to "x",
   # which would change the function's `filename` and force an update.
-  output_path = local.is_image ? null : "${trimsuffix(var.source_file, ".py")}.zip"
+  output_path = local.is_image ? null : coalesce(var.zip_path, "${trimsuffix(var.source_file, ".py")}.zip")
 }
 
 data "archive_file" "this" {
