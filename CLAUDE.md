@@ -40,7 +40,7 @@ docs/              project-notes.md (decisions, history, backlog)
 
 ## Names
 
-- S3: `vladaya-tapo-cameras` (`clips/{camera}/{YYYYMMDD}/...`, `thumbnails/...`), frontend bucket `vladaya-tapo-cameras-frontend`
+- S3: `vladaya-tapo-cameras` (`clips/{camera}/{YYYYMMDD}/...`, `thumbnails/...`; the `demo` camera only under `demo/clips/demo/...` and `demo/thumbnails/demo/...`, outside the lifecycle, never expires), frontend bucket `vladaya-tapo-cameras-frontend`
 - DynamoDB: `tapo-camera-clips` (PK `camera_id`, SK `start_time`; GSI `date-start_time-index`)
 - Lambdas: `tapo-clip-processor`, `tapo-clip-query`, `tapo-clip-query-demo` (same code as query, `CAMERA_SCOPE=demo`, keyless `GET /demo/clips`), `tapo-api-authorizer`
 - Region `eu-central-1`; TF state in S3 `tapo-cameras-backend-tf-state` (S3-native locking, `use_lockfile = true`)

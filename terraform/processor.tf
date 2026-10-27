@@ -27,6 +27,8 @@ module "processor" {
     S3_BUCKET        = aws_s3_bucket.camera_clips.id
     THUMBNAIL_PREFIX = "thumbnails"
     TTL_DAYS         = var.clips_ttl_days
+    DEMO_ROOT        = local.demo_root
+    DEMO_CAMERA_ID   = local.demo_camera_id
   }
 }
 
@@ -36,6 +38,7 @@ module "processor" {
 # - GetObject on clips/ (download the uploaded clip; also authorizes the
 #   HEAD request download_file makes first; there is no s3:HeadObject action)
 # - PutObject on thumbnails/ (write the generated thumbnail)
+# The same two for the demo camera under the demo root.
 resource "aws_iam_role_policy" "lambda_s3" {
   name = "tapo-clip-processor-s3"
   role = module.processor.role_name
@@ -44,16 +47,22 @@ resource "aws_iam_role_policy" "lambda_s3" {
     Version = "2012-10-17"
     Statement = [
       {
-        Sid      = "ReadClips"
-        Effect   = "Allow"
-        Action   = ["s3:GetObject"]
-        Resource = "${aws_s3_bucket.camera_clips.arn}/clips/*"
+        Sid    = "ReadClips"
+        Effect = "Allow"
+        Action = ["s3:GetObject"]
+        Resource = [
+          "${aws_s3_bucket.camera_clips.arn}/clips/*",
+          "${aws_s3_bucket.camera_clips.arn}/${local.demo_root}clips/${local.demo_camera_id}/*",
+        ]
       },
       {
-        Sid      = "WriteThumbnails"
-        Effect   = "Allow"
-        Action   = ["s3:PutObject"]
-        Resource = "${aws_s3_bucket.camera_clips.arn}/thumbnails/*"
+        Sid    = "WriteThumbnails"
+        Effect = "Allow"
+        Action = ["s3:PutObject"]
+        Resource = [
+          "${aws_s3_bucket.camera_clips.arn}/thumbnails/*",
+          "${aws_s3_bucket.camera_clips.arn}/${local.demo_root}thumbnails/${local.demo_camera_id}/*",
+        ]
       }
     ]
   })
@@ -84,6 +93,13 @@ resource "aws_s3_bucket_notification" "clip_upload" {
     lambda_function_arn = module.processor.arn
     events              = ["s3:ObjectCreated:*"]
     filter_prefix       = "clips/"
+    filter_suffix       = ".mp4"
+  }
+
+  lambda_function {
+    lambda_function_arn = module.processor.arn
+    events              = ["s3:ObjectCreated:*"]
+    filter_prefix       = "${local.demo_root}clips/"
     filter_suffix       = ".mp4"
   }
 

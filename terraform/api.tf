@@ -121,10 +121,6 @@ resource "aws_iam_role_policy" "lambda_query_s3" {
 # read the demo camera's rows and S3 prefixes. A code bug fails closed
 # (AccessDenied) instead of leaking real footage.
 
-locals {
-  demo_camera_id = "demo"
-}
-
 resource "aws_apigatewayv2_integration" "clip_query_demo" {
   api_id             = aws_apigatewayv2_api.tapo.id
   integration_type   = "AWS_PROXY"
@@ -161,6 +157,7 @@ module "query_demo" {
     S3_BUCKET            = aws_s3_bucket.camera_clips.id
     PRESIGNED_URL_EXPIRY = "3600"
     CAMERA_SCOPE         = local.demo_camera_id
+    SCOPE_KEY_ROOT       = local.demo_root
   }
 }
 
@@ -199,8 +196,8 @@ resource "aws_iam_role_policy" "lambda_query_demo_s3" {
       Effect = "Allow"
       Action = ["s3:GetObject"]
       Resource = [
-        "${aws_s3_bucket.camera_clips.arn}/clips/${local.demo_camera_id}/*",
-        "${aws_s3_bucket.camera_clips.arn}/thumbnails/${local.demo_camera_id}/*",
+        "${aws_s3_bucket.camera_clips.arn}/${local.demo_root}clips/${local.demo_camera_id}/*",
+        "${aws_s3_bucket.camera_clips.arn}/${local.demo_root}thumbnails/${local.demo_camera_id}/*",
       ]
     }]
   })

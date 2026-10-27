@@ -20,15 +20,16 @@ def handler(bucket, table, monkeypatch):
 
 
 def put_clip(table, camera_id, start_time, date="20261008", thumbnail=True):
+    root = "demo/" if camera_id == "demo" else ""  # where the processor puts each camera
     item = {
         "camera_id": camera_id,
         "start_time": start_time,
         "date": date,
         "duration_s": 10,
-        "s3_key": f"clips/{camera_id}/{date}/{camera_id}_{start_time}.mp4",
+        "s3_key": f"{root}clips/{camera_id}/{date}/{camera_id}_{start_time}.mp4",
     }
     if thumbnail:
-        item["thumbnail_s3_key"] = f"thumbnails/{camera_id}/{date}/{camera_id}_{start_time}.jpg"
+        item["thumbnail_s3_key"] = f"{root}thumbnails/{camera_id}/{date}/{camera_id}_{start_time}.jpg"
     table.put_item(Item=item)
 
 
@@ -153,6 +154,7 @@ def demo_handler(bucket, table, monkeypatch):
     monkeypatch.setenv("DYNAMODB_TABLE", TABLE)
     monkeypatch.setenv("S3_BUCKET", BUCKET)
     monkeypatch.setenv("CAMERA_SCOPE", "demo")
+    monkeypatch.setenv("SCOPE_KEY_ROOT", "demo/")
     return load_handler("query")
 
 
@@ -179,7 +181,9 @@ def test_demo_never_returns_another_camera(demo_handler, table, params):
     assert body["clips"], "expected the demo clips"
     for clip in body["clips"]:
         assert clip["camera_id"] == "demo"
-        assert "/demo/" in clip["video_url"] and "/demo/" in clip["thumbnail_url"]
+        assert f"/{clip['s3_key']}?" in clip["video_url"] and clip["s3_key"].startswith("demo/clips/demo/")
+        assert f"/{clip['thumbnail_s3_key']}?" in clip["thumbnail_url"]
+        assert clip["thumbnail_s3_key"].startswith("demo/thumbnails/demo/")
 
 
 def test_demo_without_date_returns_newest_first(demo_handler, table):
@@ -211,7 +215,15 @@ def test_demo_drops_a_row_pointing_outside_its_prefix(demo_handler, table):
         "start_time": DAY + 100,
         "date": "20261008",
         "s3_key": "clips/c660_street/20261008/c660_street_1.mp4",
-        "thumbnail_s3_key": "thumbnails/demo/20261008/demo_1.jpg",
+        "thumbnail_s3_key": "demo/thumbnails/demo/20261008/demo_1.jpg",
+    })
+    # Right camera, but outside the demo root: it would expire, and the
+    # demo role can't read it.
+    table.put_item(Item={
+        "camera_id": "demo",
+        "start_time": DAY + 150,
+        "date": "20261008",
+        "s3_key": "clips/demo/20261008/demo_150.mp4",
     })
     put_clip(table, "demo", DAY + 200)
 

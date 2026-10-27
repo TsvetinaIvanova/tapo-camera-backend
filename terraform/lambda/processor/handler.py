@@ -1,7 +1,7 @@
 """
 tapo-clip-processor Lambda handler
 
-Triggered by S3 PutObject on clips/*.mp4
+Triggered by S3 PutObject on clips/*.mp4 and demo/clips/*.mp4
 For each clip:
   1. Parses camera_id, start_time, end_time from the S3 key
   2. Generates a JPEG thumbnail via ffmpeg
@@ -11,6 +11,11 @@ For each clip:
 Expected S3 key format:
   clips/{camera_id}/{YYYYMMDD}/{camera_id}_{HHMMSS}_{duration}s.mp4
   e.g. clips/c225_front/20260617/c225_front_081430_67s.mp4
+
+The curated demo camera lives under its own root, DEMO_ROOT (demo/clips/...,
+thumbnails in demo/thumbnails/...), outside the S3 lifecycle rules, and its
+rows get no ttl: demo footage is kept until deleted by hand. Only
+DEMO_CAMERA_ID may live there, and it may live nowhere else.
 """
 
 import logging
@@ -32,6 +37,8 @@ TABLE_NAME = os.environ["DYNAMODB_TABLE"]
 S3_BUCKET = os.environ["S3_BUCKET"]
 THUMBNAIL_PREFIX = os.environ.get("THUMBNAIL_PREFIX", "thumbnails")
 TTL_DAYS = int(os.environ.get("TTL_DAYS", "365"))
+DEMO_ROOT = os.environ.get("DEMO_ROOT", "demo/")
+DEMO_CAMERA_ID = os.environ.get("DEMO_CAMERA_ID", "demo")
 
 table = dynamodb.Table(TABLE_NAME)
 
@@ -47,18 +54,24 @@ def parse_s3_key(s3_key: str) -> dict:
     Parse metadata from the S3 key.
 
     Expected format:
-      clips/{camera_id}/{date}/{filename}.mp4
+      [DEMO_ROOT]clips/{camera_id}/{date}/{filename}.mp4
       filename: {camera_id}_{HHMMSS}_{duration}s
 
-    Returns dict with camera_id, date, start_time_str, duration_s,
-    or raises ValueError if the key doesn't match expected format.
+    Returns dict with root ("" or DEMO_ROOT), camera_id, date, start_time,
+    end_time, duration_s and filename, or raises ValueError if the key
+    doesn't match expected format.
     """
     # clips/c225_front/20260617/c225_front_081430_67s.mp4
-    parts = s3_key.split("/")
+    root = DEMO_ROOT if s3_key.startswith(DEMO_ROOT) else ""
+    parts = s3_key[len(root):].split("/")
     if len(parts) != 4 or parts[0] != "clips":
         raise ValueError(f"Unexpected S3 key format: {s3_key}")
 
     _, camera_id, date_str, filename = parts
+    # Demo footage never expires, so real footage must never land in the
+    # demo root, and demo footage outside it would be unreachable by the demo.
+    if (camera_id == DEMO_CAMERA_ID) != bool(root):
+        raise ValueError(f"Camera {camera_id} doesn't belong under this root: {s3_key}")
     stem = filename.replace(".mp4", "")
 
     # stem: c225_front_081430_67s
@@ -77,6 +90,7 @@ def parse_s3_key(s3_key: str) -> dict:
     end_time = start_time + duration_s
 
     return {
+        "root":       root,
         "camera_id":  camera_id,
         "date":       date_str,
         "start_time": start_time,
@@ -159,8 +173,6 @@ def write_metadata(
     processing_status: str,
 ) -> None:
     """Write clip metadata record to DynamoDB."""
-    ttl = int(time.time()) + (TTL_DAYS * 86400)
-
     item = {
         "camera_id":         parsed["camera_id"],
         "start_time":        parsed["start_time"],
@@ -173,8 +185,11 @@ def write_metadata(
         "uploaded_at":       int(time.time()),
         "processing_status": processing_status,
         "has_person":        "unknown",   # populated later by Rekognition pass
-        "ttl":               ttl,
     }
+
+    # Same retention as the S3 lifecycle, which doesn't cover the demo root
+    if not parsed["root"]:
+        item["ttl"] = int(time.time()) + (TTL_DAYS * 86400)
 
     if thumbnail_s3_key:
         item["thumbnail_s3_key"] = thumbnail_s3_key
@@ -212,7 +227,7 @@ def process_record(record: dict) -> None:
     local_clip = os.path.join(TMP_DIR, parsed["filename"])
     local_thumb = os.path.join(TMP_DIR, f"{clip_name}.jpg")
     thumbnail_key = (
-        f"{THUMBNAIL_PREFIX}/{parsed['camera_id']}/{parsed['date']}/{clip_name}.jpg"
+        f"{parsed['root']}{THUMBNAIL_PREFIX}/{parsed['camera_id']}/{parsed['date']}/{clip_name}.jpg"
     )
 
     try:

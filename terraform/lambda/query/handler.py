@@ -38,6 +38,7 @@ TABLE_NAME = os.environ["DYNAMODB_TABLE"]
 S3_BUCKET = os.environ["S3_BUCKET"]
 URL_EXPIRY = int(os.environ.get("PRESIGNED_URL_EXPIRY", "3600"))
 CAMERA_SCOPE = os.environ.get("CAMERA_SCOPE") or None
+SCOPE_KEY_ROOT = os.environ.get("SCOPE_KEY_ROOT", "")  # e.g. "demo/" for the demo camera
 DEMO_LIMIT = 50
 
 table = dynamodb.Table(TABLE_NAME)
@@ -108,7 +109,10 @@ def in_scope(s3_key: str | None) -> bool:
     """Unscoped: any key. Scoped: only keys under the scoped camera's prefixes."""
     if not CAMERA_SCOPE or not s3_key:
         return True
-    return s3_key.startswith((f"clips/{CAMERA_SCOPE}/", f"thumbnails/{CAMERA_SCOPE}/"))
+    return s3_key.startswith((
+        f"{SCOPE_KEY_ROOT}clips/{CAMERA_SCOPE}/",
+        f"{SCOPE_KEY_ROOT}thumbnails/{CAMERA_SCOPE}/",
+    ))
 
 
 def enrich_with_urls(items: list) -> list:
