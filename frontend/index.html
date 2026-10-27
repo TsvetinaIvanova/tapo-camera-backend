@@ -399,18 +399,57 @@
     margin-top: 10px;
     min-height: 16px;
   }
+
+  .gate-card button.gate-alt {
+    background: none;
+    color: var(--text-dim);
+    height: auto;
+    margin-top: 8px;
+    font-size: 12px;
+  }
+
+  .gate-card button.gate-alt:hover { color: var(--text); }
+
+  /* ── Demo mode ─────────────────────────────────────── */
+  .demo-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+    padding: 10px 14px;
+    margin-bottom: 20px;
+    border: 1px solid var(--accent-dim);
+    border-radius: var(--radius);
+    background: var(--accent-dim);
+    font-size: 13px;
+  }
+
+  .demo-banner button {
+    background: none;
+    border: 1px solid var(--accent);
+    border-radius: var(--radius);
+    color: var(--accent);
+    padding: 4px 10px;
+    font-size: 12px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+
+  .demo-banner button:hover { background: var(--accent-dim); }
 </style>
 </head>
 <body>
 
-<!-- Access gate — shown until a valid access code is entered -->
-<div class="gate-overlay" id="gate-overlay">
+<!-- Access gate — shown when the user wants to enter a key, or a stored key is rejected -->
+<div class="gate-overlay hidden" id="gate-overlay">
   <div class="gate-card">
     <h2>Access Code Required</h2>
     <p>Enter the access code to view camera clips.</p>
     <input type="password" id="gate-input" placeholder="Access code" autocomplete="off">
     <button id="gate-submit">Unlock</button>
     <div class="gate-error" id="gate-error"></div>
+    <button class="gate-alt" id="gate-demo">View the demo instead</button>
   </div>
 </div>
 
@@ -420,7 +459,12 @@
 </header>
 
 <main>
-  <div class="controls">
+  <div class="demo-banner" id="demo-banner" style="display:none">
+    <span>Demo mode: sample footage from a test camera.</span>
+    <button id="demo-unlock">Enter access code</button>
+  </div>
+
+  <div class="controls" id="controls">
     <div class="field">
       <label>Date</label>
       <input type="date" id="date-picker">
@@ -485,17 +529,32 @@
     if (!value) { gateError.textContent = "Please enter an access code."; return; }
     localStorage.setItem(GATE_STORAGE_KEY, value);
     hideGate();
+    setDemoMode(false);
+    loadClips();
   }
 
   gateSubmit.addEventListener("click", submitGate);
   gateInput.addEventListener("keydown", e => { if (e.key === "Enter") submitGate(); });
-
-  // Show the gate immediately if we don't have a stored key yet —
-  // before any config/API calls happen.
-  if (!getApiKey()) {
-    showGate();
-  } else {
+  document.getElementById("gate-demo").addEventListener("click", () => {
     hideGate();
+    setDemoMode(true);
+    loadClips();
+  });
+  document.getElementById("demo-unlock").addEventListener("click", () => showGate());
+
+  // ── Demo mode ────────────────────────────────────────────
+  // Without a stored key the page shows the demo camera instead of a
+  // locked screen: GET /demo/clips needs no key and only ever returns
+  // curated sample footage (scoped by the API and its IAM role, not here).
+  let demoMode = false;
+
+  function setDemoMode(on) {
+    demoMode = on;
+    document.getElementById("demo-banner").style.display = on ? "flex" : "none";
+    document.getElementById("controls").style.display = on ? "none" : "flex";
+    resultsEl.innerHTML = "";
+    tabsBar.style.display = "none";
+    setStatus("");
   }
 
   async function loadConfig() {
@@ -527,18 +586,23 @@
 
   datePicker.value = new Date().toISOString().slice(0, 10);
 
-  loadBtn.addEventListener("click", async () => {
-    if (!API_BASE) {
-      try { await loadConfig(); } catch { return; }
-    }
+  loadBtn.addEventListener("click", loadClips);
+
+  hideGate();
+  if (!getApiKey()) {
+    setDemoMode(true);
     loadClips();
-  });
+  }
 
 
   // ── Load ───────────────────────────────────────────────
   async function loadClips() {
+    if (!API_BASE) {
+      try { await loadConfig(); } catch { return; }
+    }
+
     const date = datePicker.value.replace(/-/g, "");
-    if (!date) { setStatus("Please select a date.", "error"); return; }
+    if (!demoMode && !date) { setStatus("Please select a date.", "error"); return; }
 
     setStatus('<span class="spinner"></span> Loading…');
     loadBtn.disabled = true;
@@ -546,11 +610,20 @@
     tabsBar.style.display = "none";
 
     try {
-      const res = await fetch(`${API_BASE}/clips?date=${date}`, {
-        headers: { "x-api-key": getApiKey() }
-      });
+      // The demo route takes no date (it returns the newest demo clips)
+      // and no key: never send the real key to the keyless route.
+      const res = demoMode
+        ? await fetch(`${API_BASE}/demo/clips`)
+        : await fetch(`${API_BASE}/clips?date=${date}`, {
+            headers: { "x-api-key": getApiKey() }
+          });
 
-      if (res.status === 401 || res.status === 403) {
+      if (demoMode && res.status === 429) {
+        setStatus("The demo is busy right now. Try again in a minute.", "error");
+        return;
+      }
+
+      if (!demoMode && (res.status === 401 || res.status === 403)) {
         localStorage.removeItem(GATE_STORAGE_KEY);
         setStatus("");
         showGate("Invalid or expired access code — please re-enter.");
@@ -565,7 +638,8 @@
       cameras   = [...new Set(clipsData.map(c => c.camera_id).filter(Boolean))].sort();
       activeTab = cameras.length === 1 ? cameras[0] : "all";
 
-      setStatus(`${clipsData.length} clip${clipsData.length !== 1 ? "s" : ""} on ${formatDate(date)}`);
+      const count = `${clipsData.length} clip${clipsData.length !== 1 ? "s" : ""}`;
+      setStatus(demoMode ? `${count} (newest first)` : `${count} on ${formatDate(date)}`);
       renderTabs();
       renderClips();
 
@@ -617,7 +691,7 @@
       resultsEl.innerHTML = `
         <div class="empty">
           <div style="font-size:32px">📭</div>
-          <p>No clips found for this date${activeTab !== "all" ? " and camera" : ""}.</p>
+          <p>${demoMode ? "No demo clips yet." : `No clips found for this date${activeTab !== "all" ? " and camera" : ""}.`}</p>
         </div>`;
       return;
     }
@@ -648,7 +722,7 @@
           : `<div class="thumb-placeholder">🎥</div>`
         }
         <div class="clip-info">
-          <div class="clip-time">${timeStr} UTC</div>
+          <div class="clip-time">${demoMode && clip.date ? formatShortDate(clip.date) + " " : ""}${timeStr} UTC</div>
           <div class="clip-meta">${camMeta}${duration}${fileSize ? " · " + fileSize : ""}</div>
         </div>
         <span class="status-badge ${badgeCls}">${status}</span>
@@ -703,6 +777,11 @@
   function formatDate(yyyymmdd) {
     const d = new Date(yyyymmdd.slice(0,4), yyyymmdd.slice(4,6) - 1, yyyymmdd.slice(6,8));
     return d.toLocaleDateString("en-GB", { day:"numeric", month:"long", year:"numeric" });
+  }
+
+  function formatShortDate(yyyymmdd) {
+    const d = new Date(yyyymmdd.slice(0,4), yyyymmdd.slice(4,6) - 1, yyyymmdd.slice(6,8));
+    return d.toLocaleDateString("en-GB", { day:"numeric", month:"short" });
   }
 
   function formatBytes(bytes) {
