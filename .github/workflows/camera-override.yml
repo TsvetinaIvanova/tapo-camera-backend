@@ -1,0 +1,76 @@
+# Pause a camera, or poll it even while auto-paused, without SSH to the Pi.
+# Run it from the Actions tab or the GitHub mobile app. It writes
+# /tapo/poller/override/<camera> in SSM; the poller reads that before each
+# cycle, so it takes effect on the camera's next cycle. Every override
+# expires by itself.
+name: Camera override
+
+on:
+  workflow_dispatch:
+    inputs:
+      camera:
+        description: Camera
+        type: choice
+        options: [c660_street, c225_garage, c325_back, c325_porch]
+      action:
+        description: "pause: don't contact the camera; poll: poll it even if auto-paused; clear: back to normal"
+        type: choice
+        options: [pause, poll, clear]
+      hours:
+        description: Hours until the override expires (pause and poll; 1-168)
+        type: number
+        default: 24
+
+permissions:
+  contents: read
+
+concurrency:
+  group: camera-override-${{ inputs.camera }}
+  cancel-in-progress: false
+
+jobs:
+  override:
+    runs-on: ubuntu-latest
+    # The role trusts only this environment's OIDC subject (terraform/bootstrap).
+    environment: camera-control
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      AWS_REGION: eu-central-1
+      # Inputs go through env, never straight into the script.
+      CAMERA: ${{ inputs.camera }}
+      ACTION: ${{ inputs.action }}
+      HOURS: ${{ inputs.hours }}
+      ACTOR: ${{ github.actor }}
+    steps:
+      - name: Validate hours
+        if: inputs.action != 'clear'
+        run: |
+          if ! [[ "$HOURS" =~ ^[0-9]+$ ]] || [ "$HOURS" -lt 1 ] || [ "$HOURS" -gt 168 ]; then
+            echo "::error::hours must be a whole number from 1 to 168, got '$HOURS'"
+            exit 1
+          fi
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_CAMERA_CONTROL_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Write the override
+        run: |
+          name="/tapo/poller/override/$CAMERA"
+          if [ "$ACTION" = clear ]; then
+            if ! out=$(aws ssm delete-parameter --name "$name" 2>&1); then
+              grep -q ParameterNotFound <<<"$out" || { echo "$out"; exit 1; }
+              echo "No override was set for $CAMERA"
+            fi
+            echo "**$CAMERA**: override cleared, normal polling from its next cycle." >> "$GITHUB_STEP_SUMMARY"
+          else
+            until=$(date -u -d "+$HOURS hours" +%Y-%m-%dT%H:%M:%SZ)
+            value=$(jq -cn --arg mode "$ACTION" --arg until "$until" --arg by "$ACTOR" \
+              '{mode: $mode, until: $until, set_by: $by}')
+            aws ssm put-parameter --name "$name" --type String --overwrite --value "$value" > /dev/null
+            echo "**$CAMERA**: \`$ACTION\` until $until (UTC), from its next cycle." >> "$GITHUB_STEP_SUMMARY"
+          fi

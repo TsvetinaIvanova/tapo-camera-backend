@@ -112,3 +112,25 @@ resource "aws_iam_user_policy_attachment" "poller_logs" {
 resource "aws_iam_access_key" "poller" {
   user = aws_iam_user.poller.name
 }
+
+# Read-only access to the per-camera polling overrides that
+# camera-override.yml writes (pause, or poll even while auto-paused).
+# The parameters are runtime state, not Terraform resources: Terraform only
+# grants access to the path. Inline, since it is 1:1 with this user (see
+# the IAM policies decision in docs/project-notes.md).
+resource "aws_iam_user_policy" "poller_overrides" {
+  name = "tapo-poller-read-overrides"
+  user = aws_iam_user.poller.name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid      = "ReadPollingOverrides"
+        Effect   = "Allow"
+        Action   = ["ssm:GetParameter"]
+        Resource = "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/tapo/poller/override/*"
+      }
+    ]
+  })
+}

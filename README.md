@@ -59,6 +59,7 @@ flowchart LR
 | Public demo scoped in code and in IAM: the demo function can only query `camera_id = demo` (`dynamodb:LeadingKeys`) and read `demo/` objects; the route is throttled. The poller can't write under `demo/`, and the processor rejects real cameras there | A keyless route exposing real footage | [api.tf](terraform/api.tf), [query/handler.py](terraform/lambda/query/handler.py), [processor/handler.py](terraform/lambda/processor/handler.py) | [tests/test_query.py](tests/test_query.py) (the demo never returns another camera); plan review |
 | Supply chain: digest-pinned base image, ffmpeg from a GPG-verified, SHA-256-pinned tarball, Dependabot for base digest and pins, ECR scan on push, immutable tags | Vulnerable or tampered dependencies | [Dockerfile](terraform/lambda/processor/Dockerfile), [deploy.yml](.github/workflows/deploy.yml) | Image smoke test in CI; scan report on every deploy |
 | ECR repository policy: only the processor function can pull | Image exfiltration / use by other principals | [processor.tf](terraform/processor.tf) | Plan review |
+| Camera override role trusted only for the `camera-control` GitHub environment, and limited to writing `/tapo/poller/override/*` | A remote toggle becoming a path to deploy credentials, or the reverse | [bootstrap/github_oidc.tf](terraform/bootstrap/github_oidc.tf), [camera-override.yml](.github/workflows/camera-override.yml) | A job in the environment has an environment OIDC subject, which the apply role doesn't trust |
 | Dependabot PRs get no AWS credentials | Bot-authored code running with cloud access | [ci.yml](.github/workflows/ci.yml) | Plan job skipped for `dependabot[bot]` |
 
 Accepted and documented: the Pi uses a long-lived, least-privilege IAM user (IAM Roles Anywhere was evaluated and judged not worth it for one device), and the shared-secret API auth is a deliberate step short of Cognito. The reasoning, and the upgrade path, are in [the notes](docs/project-notes.md#decisions-and-why).
@@ -69,13 +70,15 @@ Accepted and documented: the Pi uses a long-lived, least-privilege IAM user (IAM
 |---|---|---|
 | [ci.yml](.github/workflows/ci.yml) | PRs and pushes to `main` | Lint; pytest + moto tests for all three Lambdas (a required gate; known bugs get strict `xfail` tests, never `continue-on-error`); build and smoke-test the processor image; `terraform plan` posted as a PR comment |
 | [deploy.yml](.github/workflows/deploy.yml) | Merge to `main` | Build, smoke-test and push the image to ECR; `terraform apply` pinned to that image digest; deploy the frontend; report image scan findings |
+| [camera-override.yml](.github/workflows/camera-override.yml) | Manual (Actions tab or GitHub mobile app) | Pause a camera, or poll it even while auto-paused, until a chosen time; writes an SSM parameter the poller reads before each cycle. Its own role, trusted only for the `camera-control` environment |
 
 Lambda code is never deployed by hand: the zips are built by Terraform (`archive_file`, byte-identical locally and in CI), and the processor function always points at a digest-pinned image.
 
 ## Observability
 
-- **Heartbeat per camera:** `PollCycleCompleted` comes from the poller itself, because "no clips" alone can't tell a broken poller from a quiet night. Alarmed per camera; missing data counts as breaching.
+- **Heartbeat per camera:** `PollCycleCompleted` comes from the poller itself, because "no clips" alone can't tell a broken poller from a quiet night. Alarmed per camera; missing data counts as breaching. A cycle skipped on purpose (manual pause or low-battery auto-pause) still sends it, plus `PollCyclePaused`, so a pause doesn't page but a dead thread does.
 - **Errors per camera:** `PollCycleErrors`, alarmed per camera.
+- **Battery:** the solar/battery camera reports `BatteryPercent` every poll, read in the session the poller already opens; alarm below 25%. Below 35% the poller stops downloading from it and checks the battery every few hours until it's back above 55%.
 - **Pipeline:** `ClipsProcessed` (log metric filter, missing data treated as breaching) and processor Lambda errors.
 - All alarms go to SNS e-mail. All poller and Lambda logs are in CloudWatch Logs.
 

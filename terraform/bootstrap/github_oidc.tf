@@ -314,6 +314,16 @@ resource "aws_iam_role_policy" "github_actions_deploy" {
         }
       },
       {
+        # Inline policies on the poller user (e.g. tapo-poller-read-overrides)
+        Sid    = "PollerUserInlinePolicies"
+        Effect = "Allow"
+        Action = [
+          "iam:PutUserPolicy",
+          "iam:DeleteUserPolicy",
+        ]
+        Resource = "arn:aws:iam::${local.account_id}:user/${var.poller_user_name}"
+      },
+      {
         Sid      = "ReadOIDCProvider"
         Effect   = "Allow"
         Action   = "iam:GetOpenIDConnectProvider"
@@ -336,5 +346,52 @@ resource "aws_iam_role_policy" "github_actions_deploy" {
         Resource  = "arn:aws:iam::${local.account_id}:role/tapo-github-actions*"
       }
     ]
+  })
+}
+
+# ── Camera-control role: camera-override.yml only ─────────
+# Writes the per-camera polling overrides the poller reads (pause a camera,
+# or poll it while auto-paused). Trusted only for jobs in the camera-control
+# GitHub environment: such a job's OIDC subject is the environment, not the
+# branch, so it can't assume the apply role, and no deploy job can assume
+# this one. Restrict the environment to main in the repo settings
+# (Environments > camera-control > Deployment branches).
+resource "aws_iam_role" "github_actions_camera_control" {
+  name = "tapo-github-actions-camera-control"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Principal = {
+        Federated = aws_iam_openid_connect_provider.github.arn
+      }
+      Action = "sts:AssumeRoleWithWebIdentity"
+      Condition = {
+        StringEquals = {
+          "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
+          "token.actions.githubusercontent.com:sub" = "repo:${var.github_repo}:environment:camera-control"
+        }
+      }
+    }]
+  })
+}
+
+resource "aws_iam_role_policy" "github_actions_camera_control" {
+  name = "tapo-github-actions-camera-control"
+  role = aws_iam_role.github_actions_camera_control.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid    = "WritePollingOverrides"
+      Effect = "Allow"
+      Action = [
+        "ssm:GetParameter",
+        "ssm:PutParameter",
+        "ssm:DeleteParameter",
+      ]
+      Resource = "arn:aws:ssm:${local.region}:${local.account_id}:parameter/tapo/poller/override/*"
+    }]
   })
 }

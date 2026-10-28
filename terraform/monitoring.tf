@@ -86,7 +86,11 @@ locals {
 }
 
 # Fires if a given camera's poller thread stops reporting entirely —
-# process crashed, thread hung, systemd service down, etc.
+# process crashed, thread hung, systemd service down, etc. A cycle skipped
+# on purpose (manual pause, or auto-paused on low battery) still emits
+# PollCycleCompleted (plus PollCyclePaused, not alarmed on), so a pause
+# doesn't page. Kept to one metric on purpose: metric math would bill each
+# metric in the expression as a separate alarm metric.
 resource "aws_cloudwatch_metric_alarm" "poller_heartbeat" {
   for_each = toset(local.tapo_camera_names)
 
@@ -129,6 +133,40 @@ resource "aws_cloudwatch_metric_alarm" "poller_errors" {
   threshold           = 1
   comparison_operator = "GreaterThanOrEqualToThreshold"
   treat_missing_data  = "notBreaching" # no errors reported = healthy, not alarming
+
+  alarm_actions = [aws_sns_topic.alerts.arn]
+  ok_actions    = [aws_sns_topic.alerts.arn]
+}
+
+# ── Battery alarm ───────────────────────────────────────────
+
+locals {
+  # Cameras with battery_powered: true in poller/config.yaml.
+  tapo_battery_camera_names = ["c660_street"]
+}
+
+# Fires when a battery camera's charge drops low, so there's time to pause
+# polling or slow it down before the camera dies. The poller reads the
+# battery in the session it already opens, so this metric arrives once per
+# poll cycle. Gaps (thread dead, connection failed) are the heartbeat and
+# error alarms' job, so missing data keeps the current state instead of
+# flapping to OK.
+resource "aws_cloudwatch_metric_alarm" "battery_low" {
+  for_each = toset(local.tapo_battery_camera_names)
+
+  alarm_name        = "tapo-battery-low-${each.value}"
+  alarm_description = "${each.value} battery below ${var.battery_low_threshold_percent}% — consider pausing or slowing its polling"
+  namespace         = "Tapo/Camera"
+  metric_name       = "BatteryPercent"
+  dimensions = {
+    CameraName = each.value
+  }
+  statistic           = "Minimum"
+  period              = 3600 # longer than the slowest night_mode interval
+  evaluation_periods  = 1
+  threshold           = var.battery_low_threshold_percent
+  comparison_operator = "LessThanThreshold"
+  treat_missing_data  = "missing"
 
   alarm_actions = [aws_sns_topic.alerts.arn]
   ok_actions    = [aws_sns_topic.alerts.arn]

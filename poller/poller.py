@@ -8,6 +8,11 @@ define a "night_mode" window with a longer (not zero) interval to avoid
 draining the battery overnight while still preventing a huge backlog
 from building up before sunrise.
 
+Battery-powered cameras can also stop being polled to save battery: by
+hand, through an expiring SSM override set from GitHub Actions
+(camera-override.yml), or automatically below a battery threshold
+(auto_pause), checking the battery now and then until it has recharged.
+
 Tracks last-seen clip per camera in a shared state file (guarded by a
 lock, since multiple threads write to it).
 
@@ -27,6 +32,7 @@ from pathlib import Path
 
 import boto3
 import yaml
+from botocore.config import Config
 from botocore.exceptions import ClientError
 from pytapo import Tapo
 from pytapo.media_stream.downloader import Downloader
@@ -81,7 +87,6 @@ parser.add_argument(
     default=os.path.join(os.path.dirname(__file__), "config.yaml"),
     help="Path to config.yaml",
 )
-args = parser.parse_args()
 
 
 # ── Config ────────────────────────────────────────────────
@@ -157,7 +162,19 @@ def make_cloudwatch_client(profile: str, region: str):
     return session.client("cloudwatch")
 
 
-def emit_metric(cloudwatch_client, metric_name: str, camera_name: str, value: float = 1.0) -> None:
+def make_ssm_client(profile: str, region: str):
+    # Short timeouts and few retries: the override is read before every
+    # cycle, and an SSM outage must not stall polling.
+    session = boto3.Session(profile_name=profile, region_name=region)
+    return session.client(
+        "ssm",
+        config=Config(connect_timeout=3, read_timeout=3, retries={"max_attempts": 2}),
+    )
+
+
+def emit_metric(
+    cloudwatch_client, metric_name: str, camera_name: str, value: float = 1.0, unit: str = "Count"
+) -> None:
     """
     Push a heartbeat/error metric to CloudWatch. Failures here are logged
     but never raised — a metrics outage must never take down the poller
@@ -171,7 +188,7 @@ def emit_metric(cloudwatch_client, metric_name: str, camera_name: str, value: fl
                     "MetricName": metric_name,
                     "Dimensions": [{"Name": "CameraName", "Value": camera_name}],
                     "Value": value,
-                    "Unit": "Count",
+                    "Unit": unit,
                 }
             ],
         )
@@ -296,6 +313,168 @@ def persist_clip_progress(
             save_state(state_file, full_state)
 
 
+# ── Pausing: manual override and battery auto-pause ──────
+OVERRIDE_PARAMETER_PREFIX = "/tapo/poller/override/"
+OVERRIDE_MODES = ("pause", "poll")
+DEFAULT_PROBE_INTERVAL_SECONDS = 3 * 3600
+
+
+def parse_override(value: str, camera_name: str):
+    """
+    Parse an override parameter value, written by camera-override.yml:
+      {"mode": "pause" | "poll", "until": "2026-10-29T12:00:00Z", "set_by": "..."}
+    "pause" stops contacting the camera; "poll" polls it even while
+    auto-paused. Returns a dict with a timezone-aware "until", or None if
+    the value is malformed (logged, then ignored: polling goes on as normal).
+    """
+    try:
+        data = json.loads(value)
+        mode = data["mode"]
+        until = datetime.fromisoformat(data["until"].replace("Z", "+00:00"))
+    except (ValueError, KeyError, TypeError, AttributeError) as e:
+        logger.warning(f"  ⚠️  [{camera_name}] Ignoring malformed override {value!r}: {e}")
+        return None
+    if mode not in OVERRIDE_MODES or until.tzinfo is None:
+        logger.warning(f"  ⚠️  [{camera_name}] Ignoring override with unknown mode or no timezone: {value!r}")
+        return None
+    return {"mode": mode, "until": until, "set_by": data.get("set_by")}
+
+
+def read_override(ssm_client, camera_name: str, cache: dict):
+    """
+    Return the camera's active override, or None. A missing parameter means
+    no override. If SSM can't be reached, the last value read is kept (and
+    still expires on time); after a restart with SSM down there is no last
+    value, so polling is normal. Never raises.
+    """
+    if ssm_client is not None:
+        try:
+            response = ssm_client.get_parameter(Name=OVERRIDE_PARAMETER_PREFIX + camera_name)
+            cache["override"] = parse_override(response["Parameter"]["Value"], camera_name)
+        except ClientError as e:
+            if e.response.get("Error", {}).get("Code") == "ParameterNotFound":
+                cache["override"] = None
+            else:
+                logger.warning(f"  ⚠️  [{camera_name}] Could not read override, keeping last known: {e}")
+        except Exception as e:
+            logger.warning(f"  ⚠️  [{camera_name}] Could not read override, keeping last known: {e}")
+
+    override = cache.get("override")
+    if override and override["until"] > datetime.now(timezone.utc):
+        return override
+    return None
+
+
+def validate_auto_pause(camera: dict) -> None:
+    """
+    Check a camera's auto_pause settings at startup:
+      auto_pause:
+        pause_below_percent: 35
+        resume_above_percent: 55
+        probe_interval_seconds: 10800   # battery check while paused
+    Invalid settings disable auto-pause for that camera (logged as an error)
+    instead of stopping the poller, so uploads go on.
+    """
+    cfg = camera.get("auto_pause")
+    if cfg is None:
+        return
+    try:
+        valid = (
+            camera.get("battery_powered") is True
+            and 0 <= cfg["pause_below_percent"] < cfg["resume_above_percent"] <= 100
+            and cfg.get("probe_interval_seconds", DEFAULT_PROBE_INTERVAL_SECONDS) > 0
+        )
+    except (KeyError, TypeError):
+        valid = False
+    if not valid:
+        logger.error(
+            f"❌  [{camera['name']}] Invalid auto_pause settings {cfg!r} (needs battery_powered: true and "
+            f"0 <= pause_below_percent < resume_above_percent <= 100): auto-pause disabled"
+        )
+        camera.pop("auto_pause")
+
+
+def update_auto_pause(camera: dict, cam_state: dict, percent, camera_name: str) -> bool:
+    """
+    Apply the auto_pause thresholds to a battery reading and return whether
+    the camera is (still) auto-paused. Two thresholds, so a reading around
+    one level doesn't switch between pausing and polling every cycle.
+    Without a reading (percent is None), the previous decision stands.
+    """
+    cfg = camera.get("auto_pause")
+    if not cfg:
+        cam_state.pop("auto_paused", None)
+        return False
+
+    paused = cam_state.get("auto_paused", False)
+    if percent is not None:
+        if not paused and percent < cfg["pause_below_percent"]:
+            paused = True
+            logger.warning(
+                f"  🪫  [{camera_name}] Battery {percent}% < {cfg['pause_below_percent']}%: auto-pausing downloads"
+            )
+        elif paused and percent > cfg["resume_above_percent"]:
+            paused = False
+            logger.info(
+                f"  🔋  [{camera_name}] Battery {percent}% > {cfg['resume_above_percent']}%: resuming downloads"
+            )
+    cam_state["auto_paused"] = paused
+    return paused
+
+
+def emit_skipped_cycle(cloudwatch_client, camera_name: str) -> None:
+    """
+    Metrics for a cycle skipped on purpose, without contacting the camera.
+    PollCycleCompleted is the heartbeat ("the thread ran"), so the heartbeat
+    alarm stays a plain one-metric alarm instead of metric math, which bills
+    every metric in the expression. PollCyclePaused says nothing was polled,
+    so availability (SLO) numbers can subtract paused cycles.
+    """
+    if cloudwatch_client:
+        emit_metric(cloudwatch_client, "PollCycleCompleted", camera_name)
+        emit_metric(cloudwatch_client, "PollCyclePaused", camera_name)
+
+
+def seconds_until_battery_check(camera: dict, cam_state: dict, now: float = None) -> float:
+    """
+    While auto-paused, seconds until the next battery check is due; 0 when
+    it is due now, or when the camera isn't auto-paused (poll as normal).
+    """
+    cfg = camera.get("auto_pause")
+    if not cfg or not cam_state.get("auto_paused"):
+        return 0.0
+    now = time.time() if now is None else now
+    due = cam_state.get("last_battery_check", 0) + cfg.get(
+        "probe_interval_seconds", DEFAULT_PROBE_INTERVAL_SECONDS
+    )
+    return max(0.0, due - now)
+
+
+async def report_battery(loop, tapo, camera_name: str, cloudwatch_client=None):
+    """
+    Log and emit the battery level of a battery-powered camera, and return
+    it (None if it couldn't be read). Reuses the session poll_camera already
+    opened, so it costs no extra wake. Best-effort: a failure is logged and
+    ignored, never counted as a poll error, and never blocks the downloads
+    that follow.
+    """
+    try:
+        response = await loop.run_in_executor(None, tapo.getBatteryStatus)
+        status = response["battery"]["status"]
+        percent = status["battery_percent"]
+    except Exception as e:
+        logger.warning(f"  ⚠️  [{camera_name}] Could not read battery status: {e}")
+        return None
+
+    logger.info(
+        f"  🔋  [{camera_name}] Battery {percent}% "
+        f"(charging: {status.get('battery_charging')}, {status.get('battery_temperature')}°C)"
+    )
+    if cloudwatch_client:
+        emit_metric(cloudwatch_client, "BatteryPercent", camera_name, percent, unit="Percent")
+    return percent
+
+
 # ── Camera poll (single pass, one camera) ────────────────
 async def poll_camera(
     camera: dict,
@@ -306,6 +485,7 @@ async def poll_camera(
     cloudwatch_client=None,
     state_lock: threading.Lock = None,
     state_file: str = None,
+    force_poll: bool = False,
 ) -> dict:
     name = camera["name"]
     ip = camera["ip"]
@@ -336,6 +516,20 @@ async def poll_camera(
         if cloudwatch_client:
             emit_metric(cloudwatch_client, "PollCycleErrors", name)
         return state
+
+    if camera.get("battery_powered"):
+        percent = await report_battery(loop, tapo, name, cloudwatch_client)
+        cam_state = state.setdefault(name, {})
+        # Recorded even if the read failed, so a failing read can't turn
+        # every cycle into a battery check (one wake each).
+        cam_state["last_battery_check"] = int(time.time())
+        if update_auto_pause(camera, cam_state, percent, name):
+            if not force_poll:
+                logger.info(f"  ⏸️  [{name}] Auto-paused (low battery): skipping downloads")
+                if cloudwatch_client:
+                    emit_metric(cloudwatch_client, "PollCyclePaused", name)
+                return state
+            logger.info(f"  ⏩  [{name}] Auto-paused, but a poll override is active: downloading")
 
     # Determine date range to check — today + yesterday to catch midnight boundary
     now = datetime.now(timezone.utc)
@@ -425,11 +619,18 @@ def camera_worker(
     tmp_dir: str,
     cloudwatch_client=None,
     startup_delay: float = 0.0,
+    ssm_client=None,
 ) -> None:
     """
     Runs forever in its own thread. Polls one camera, sleeps for that
     camera's own interval (which may vary by time of day via night_mode),
     and repeats — completely independent of every other camera's thread.
+
+    A cycle is skipped without contacting the camera while a "pause"
+    override is active, or while it is auto-paused and no battery check
+    is due. A skipped cycle still emits the PollCycleCompleted heartbeat
+    (the thread is alive), plus PollCyclePaused to say why nothing was
+    polled; see emit_skipped_cycle.
 
     startup_delay staggers each camera's *first* poll so all threads
     don't hit their cameras' auth handshake at the exact same moment
@@ -451,43 +652,72 @@ def camera_worker(
     # deferred cleanup from cycle N just runs at the start of cycle
     # N+1's run_until_complete() instead of being cut off.
     loop = asyncio.new_event_loop()
+    override_cache = {}
 
     try:
         while True:
+            interval = get_camera_interval(camera, config)
+            override = read_override(ssm_client, name, override_cache)
+            mode = override["mode"] if override else None
+
             with state_lock:
                 state = load_state(state_file)
+            check_in = seconds_until_battery_check(camera, state.get(name, {}))
 
-            try:
-                updated_state = loop.run_until_complete(
-                    poll_camera(
-                        camera, config, state, s3_client, tmp_dir,
-                        cloudwatch_client=cloudwatch_client,
-                        state_lock=state_lock,
-                        state_file=state_file,
-                    )
+            if mode == "pause":
+                remaining = (override["until"] - datetime.now(timezone.utc)).total_seconds()
+                logger.info(
+                    f"⏸️  [{name}] Paused by override ({override.get('set_by') or 'unknown'}) until "
+                    f"{override['until'].astimezone(timezone.utc):%Y-%m-%d %H:%M} UTC: not contacting the camera"
                 )
-            except Exception as e:
-                logger.error(
-                    f"  ❌  [{name}] Unexpected error in poll cycle: {e}", exc_info=True
+                emit_skipped_cycle(cloudwatch_client, name)
+                sleep_for = min(interval, max(remaining, 1))
+            elif check_in > 0 and mode != "poll":
+                logger.info(
+                    f"⏸️  [{name}] Auto-paused (low battery): next battery check in {check_in / 60:.0f} min"
+                )
+                emit_skipped_cycle(cloudwatch_client, name)
+                sleep_for = min(interval, check_in)
+            else:
+                if mode == "poll":
+                    logger.info(
+                        f"⏩  [{name}] Poll override ({override.get('set_by') or 'unknown'}) until "
+                        f"{override['until'].astimezone(timezone.utc):%Y-%m-%d %H:%M} UTC"
                     )
-                if cloudwatch_client:
-                    emit_metric(cloudwatch_client, "PollCycleErrors", name)
-                updated_state = state
+                try:
+                    updated_state = loop.run_until_complete(
+                        poll_camera(
+                            camera, config, state, s3_client, tmp_dir,
+                            cloudwatch_client=cloudwatch_client,
+                            state_lock=state_lock,
+                            state_file=state_file,
+                            force_poll=mode == "poll",
+                        )
+                    )
+                except Exception as e:
+                    logger.error(
+                        f"  ❌  [{name}] Unexpected error in poll cycle: {e}", exc_info=True
+                        )
+                    if cloudwatch_client:
+                        emit_metric(cloudwatch_client, "PollCycleErrors", name)
+                    updated_state = state
 
-            # Belt-and-suspenders final sync — poll_camera already persists
-            # progress incrementally after every clip via persist_clip_progress,
-            # so this is normally a no-op write of values already on disk.
-            # It stays as a safety net for the (rare) case a whole cycle
-            # completes with in-memory state ahead of what got persisted.
-            with state_lock:
-                full_state = load_state(state_file)
-            if name in updated_state:
-                full_state[name] = updated_state[name]
-            save_state(state_file, full_state)
+                # Belt-and-suspenders final sync — poll_camera already persists
+                # progress incrementally after every clip via persist_clip_progress,
+                # so this is normally a no-op write of values already on disk.
+                # It stays as a safety net for the (rare) case a whole cycle
+                # completes with in-memory state ahead of what got persisted.
+                # It is also where the auto-pause decision gets saved, so it
+                # survives a restart.
+                with state_lock:
+                    full_state = load_state(state_file)
+                if name in updated_state:
+                    full_state[name] = updated_state[name]
+                save_state(state_file, full_state)
+                sleep_for = interval
 
-            interval = get_camera_interval(camera, config)
-            logger.info(f"💤  [{name}] sleeping {interval}s until next poll...")
-            time.sleep(interval)
+            logger.info(f"💤  [{name}] sleeping {sleep_for:.0f}s until next poll...")
+            time.sleep(sleep_for)
     finally:
         # Only reached if the while loop is ever broken out of (it isn't,
         # currently — this is a safety net, not a normal code path).
@@ -496,6 +726,7 @@ def camera_worker(
 
 # ── Main ──────────────────────────────────────────────────
 def main():
+    args = parser.parse_args()  # here, not at import, so tests can import the module
     config = load_config(args.config)
     state_file = config["poller"]["state_file"]
 
@@ -513,6 +744,12 @@ def main():
         config["aws"]["profile"],
         config["aws"]["region"],
     )
+    ssm_client = make_ssm_client(
+        config["aws"]["profile"],
+        config["aws"]["region"],
+    )
+    for camera in config["cameras"]:
+        validate_auto_pause(camera)
 
     tmp_dir = os.path.join(os.path.dirname(__file__), "tapo_clips")
     state_lock = threading.Lock()
@@ -534,6 +771,7 @@ def main():
             kwargs={
                 "cloudwatch_client": cloudwatch_client,
                 "startup_delay": i * STARTUP_STAGGER_SECONDS,
+                "ssm_client": ssm_client,
             },
             name=f"poller-{camera['name']}",
             daemon=True,
