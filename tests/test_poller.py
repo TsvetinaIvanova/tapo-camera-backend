@@ -214,6 +214,12 @@ class RecordingCloudWatch:
         self.metrics += [m["MetricName"] for m in MetricData]
 
 
+def test_skipped_cycle_still_sends_the_heartbeat(poller):
+    cloudwatch = RecordingCloudWatch()
+    poller.emit_skipped_cycle(cloudwatch, CAMERA)
+    assert cloudwatch.metrics == ["PollCycleCompleted", "PollCyclePaused"]
+
+
 @pytest.fixture
 def fake_tapo(poller, monkeypatch):
     monkeypatch.setattr(poller, "Tapo", FakeTapo)

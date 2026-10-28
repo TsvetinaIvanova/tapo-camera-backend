@@ -76,7 +76,7 @@ Lambda code is never deployed by hand: the zips are built by Terraform (`archive
 
 ## Observability
 
-- **Heartbeat per camera:** `PollCycleCompleted` comes from the poller itself, because "no clips" alone can't tell a broken poller from a quiet night. Alarmed per camera; missing data counts as breaching. A cycle skipped on purpose (manual pause or low-battery auto-pause) sends `PollCyclePaused`, which the alarm counts as alive, so a pause doesn't page but a dead thread does.
+- **Heartbeat per camera:** `PollCycleCompleted` comes from the poller itself, because "no clips" alone can't tell a broken poller from a quiet night. Alarmed per camera; missing data counts as breaching. A cycle skipped on purpose (manual pause or low-battery auto-pause) still sends it, plus `PollCyclePaused`, so a pause doesn't page but a dead thread does.
 - **Errors per camera:** `PollCycleErrors`, alarmed per camera.
 - **Battery:** the solar/battery camera reports `BatteryPercent` every poll, read in the session the poller already opens; alarm below 25%. Below 35% the poller stops downloading from it and checks the battery every few hours until it's back above 55%.
 - **Pipeline:** `ClipsProcessed` (log metric filter, missing data treated as breaching) and processor Lambda errors.

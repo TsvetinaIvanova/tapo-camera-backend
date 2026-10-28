@@ -422,6 +422,19 @@ def update_auto_pause(camera: dict, cam_state: dict, percent, camera_name: str) 
     return paused
 
 
+def emit_skipped_cycle(cloudwatch_client, camera_name: str) -> None:
+    """
+    Metrics for a cycle skipped on purpose, without contacting the camera.
+    PollCycleCompleted is the heartbeat ("the thread ran"), so the heartbeat
+    alarm stays a plain one-metric alarm instead of metric math, which bills
+    every metric in the expression. PollCyclePaused says nothing was polled,
+    so availability (SLO) numbers can subtract paused cycles.
+    """
+    if cloudwatch_client:
+        emit_metric(cloudwatch_client, "PollCycleCompleted", camera_name)
+        emit_metric(cloudwatch_client, "PollCyclePaused", camera_name)
+
+
 def seconds_until_battery_check(camera: dict, cam_state: dict, now: float = None) -> float:
     """
     While auto-paused, seconds until the next battery check is due; 0 when
@@ -615,8 +628,9 @@ def camera_worker(
 
     A cycle is skipped without contacting the camera while a "pause"
     override is active, or while it is auto-paused and no battery check
-    is due. A skipped cycle still emits PollCyclePaused, so the heartbeat
-    alarm can tell "paused" from "thread dead".
+    is due. A skipped cycle still emits the PollCycleCompleted heartbeat
+    (the thread is alive), plus PollCyclePaused to say why nothing was
+    polled; see emit_skipped_cycle.
 
     startup_delay staggers each camera's *first* poll so all threads
     don't hit their cameras' auth handshake at the exact same moment
@@ -656,15 +670,13 @@ def camera_worker(
                     f"⏸️  [{name}] Paused by override ({override.get('set_by') or 'unknown'}) until "
                     f"{override['until'].astimezone(timezone.utc):%Y-%m-%d %H:%M} UTC: not contacting the camera"
                 )
-                if cloudwatch_client:
-                    emit_metric(cloudwatch_client, "PollCyclePaused", name)
+                emit_skipped_cycle(cloudwatch_client, name)
                 sleep_for = min(interval, max(remaining, 1))
             elif check_in > 0 and mode != "poll":
                 logger.info(
                     f"⏸️  [{name}] Auto-paused (low battery): next battery check in {check_in / 60:.0f} min"
                 )
-                if cloudwatch_client:
-                    emit_metric(cloudwatch_client, "PollCyclePaused", name)
+                emit_skipped_cycle(cloudwatch_client, name)
                 sleep_for = min(interval, check_in)
             else:
                 if mode == "poll":
