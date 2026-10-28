@@ -3,6 +3,11 @@ variable "function_name" {
   type        = string
 }
 
+variable "permissions_boundary" {
+  description = "ARN of the permissions boundary for the execution role. Required: CI may only create or grant permissions to bounded roles (terraform/bootstrap/workload_boundary.tf)."
+  type        = string
+}
+
 variable "source_file" {
   description = "Zip packaging: path to the single-file Python handler; zipped next to it as <basename>.zip. Set this or image_uri."
   type        = string

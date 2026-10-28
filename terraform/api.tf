@@ -64,6 +64,8 @@ resource "aws_lambda_permission" "allow_apigw" {
 module "query" {
   source = "./modules/lambda"
 
+  permissions_boundary = local.workload_boundary_arn
+
   function_name = "tapo-clip-query"
   source_file   = "${path.module}/lambda/query/handler.py"
   timeout       = 15
@@ -145,6 +147,8 @@ resource "aws_lambda_permission" "allow_apigw_demo" {
 
 module "query_demo" {
   source = "./modules/lambda"
+
+  permissions_boundary = local.workload_boundary_arn
 
   function_name = "tapo-clip-query-demo"
   source_file   = "${path.module}/lambda/query/handler.py"
@@ -239,6 +243,8 @@ resource "aws_apigatewayv2_authorizer" "shared_secret" {
 
 module "authorizer" {
   source = "./modules/lambda"
+
+  permissions_boundary = local.workload_boundary_arn
 
   function_name = "tapo-api-authorizer"
   source_file   = "${path.module}/lambda/authorizer/handler.py"

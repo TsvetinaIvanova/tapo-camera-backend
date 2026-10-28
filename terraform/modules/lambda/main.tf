@@ -1,4 +1,5 @@
-# Generic Python Lambda: execution role allowed only to write its own logs, a
+# Generic Python Lambda: execution role (under the workload permissions
+# boundary) allowed only to write its own logs, a
 # Terraform-managed log group, and the function, packaged either as a
 # deterministic single-file zip (source_file) or a container image pinned
 # by digest (image_uri).
@@ -27,7 +28,8 @@ data "archive_file" "this" {
 }
 
 resource "aws_iam_role" "this" {
-  name = "${var.function_name}-role"
+  name                 = "${var.function_name}-role"
+  permissions_boundary = var.permissions_boundary
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"

@@ -23,9 +23,10 @@ terraform/         main stack, flat, one file per component:
                    clips.tf (clips bucket + DynamoDB)  processor.tf (Lambda + IAM + S3 trigger)
                    api.tf (HTTP API + query and authorizer Lambdas)  frontend.tf  poller.tf (IAM user)
                    monitoring.tf
-terraform/modules/lambda/  generic Python Lambda: single-file zip or digest-pinned container image, role with logging scoped to its own log group, log group, function.
+terraform/modules/lambda/  generic Python Lambda: single-file zip or digest-pinned container image, role (requires `permissions_boundary`) with logging scoped to its own log group, log group, function.
                    Per-function least-privilege policies stay in the caller (attached to module.<x>.role_name)
-terraform/bootstrap/  separate state: GitHub OIDC provider + CI plan/apply roles; applied locally by admin, never from CI
+terraform/bootstrap/  separate state: GitHub OIDC provider + CI plan/apply/camera-control roles, `tapo-workload-boundary`
+                   (workload_boundary.tf); applied locally by admin, never from CI
 terraform/lambda/  processor/handler.py  query/handler.py  authorizer/handler.py
                    processor/Dockerfile (minimal static ffmpeg built from source + handler; ECR `tapo-clip-processor`), requirements.txt,
                    smoke-test.sh + testdata/ (synthetic H.264/HEVC fixture clips)
@@ -72,7 +73,7 @@ docs/              project-notes.md (decisions, history, backlog)
 
 ## Conventions
 
-- Terraform: every variable has a default (no prompts in CI), except `alert_email`: it is required on purpose so a missing value fails loudly instead of silently dropping alerting (CI: `TF_VAR_alert_email` secret; locally: `terraform.tfvars`). Plan runs on `pull_request` only. Least-privilege IAM per resource; the GitHub OIDC role is intentionally broad (service-level wildcards).
+- Terraform: every variable has a default (no prompts in CI), except `alert_email`: it is required on purpose so a missing value fails loudly instead of silently dropping alerting (CI: `TF_VAR_alert_email` secret; locally: `terraform.tfvars`). Plan runs on `pull_request` only. Least-privilege IAM per resource; the GitHub OIDC role is intentionally broad (service-level wildcards), but every IAM role and user in the main stack must carry the `tapo-workload-boundary` permissions boundary (`local.workload_boundary_arn`): the apply role can't create or grant permissions to an unbounded identity, nor remove the boundary. A workload needing a new AWS service needs a boundary statement in `bootstrap/` first (applied locally, before the main-stack PR merges).
 - CI: `actions/checkout@v6`, `actions/setup-python@v6`, `python -m pytest`. No stored AWS keys. The `Test` job gates merges: a known bug gets a strict `xfail` test, never `continue-on-error`.
 - Frontend never hardcodes the API endpoint (reads `config.json` at runtime). API auth is a shared secret sent as the `x-api-key` header, kept in localStorage.
 - Lambda deploy: merging to `main` deploys; never `update-function-code` by hand. Query and authorizer are zips owned by Terraform (`archive_file` with `output_file_mode = "0644"` so zips are byte-identical locally and in CI). The processor is a container image: `deploy.yml` builds, smoke-tests and pushes it first, then `terraform apply` pins the function to that digest (`processor_image_digest`; PR/local plans fall back to the newest image).

@@ -16,6 +16,8 @@ locals {
 module "processor" {
   source = "./modules/lambda"
 
+  permissions_boundary = local.workload_boundary_arn
+
   function_name = "tapo-clip-processor"
   image_uri     = "${aws_ecr_repository.processor.repository_url}@${local.processor_image_digest}"
 

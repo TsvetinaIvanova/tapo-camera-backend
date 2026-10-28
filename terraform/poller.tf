@@ -4,9 +4,11 @@
 # design (see docs/project-notes.md). Least privilege: PutObject and a
 # prefix-scoped ListBucket on clips/ of this one bucket, PutMetricData in
 # the Tapo/Camera namespace, and log writes to the tapo-poller log group.
-# No GetObject, no delete, nothing else in the account.
+# No GetObject, no delete, nothing else in the account. The workload
+# permissions boundary caps it even if a policy here were loosened.
 resource "aws_iam_user" "poller" {
-  name = var.poller_user_name
+  name                 = var.poller_user_name
+  permissions_boundary = local.workload_boundary_arn
 }
 
 resource "aws_iam_policy" "poller_upload" {
