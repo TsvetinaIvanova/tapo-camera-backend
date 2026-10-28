@@ -86,24 +86,47 @@ locals {
 }
 
 # Fires if a given camera's poller thread stops reporting entirely —
-# process crashed, thread hung, systemd service down, etc.
+# process crashed, thread hung, systemd service down, etc. A cycle skipped
+# on purpose (manual pause, or auto-paused on low battery) emits
+# PollCyclePaused instead, so it counts as a sign of life too.
 resource "aws_cloudwatch_metric_alarm" "poller_heartbeat" {
   for_each = toset(local.tapo_camera_names)
 
-  alarm_name        = "tapo-poller-heartbeat-${each.value}"
-  alarm_description = "No poll cycle reported for ${each.value} in 30 minutes — poller thread may be dead or hung"
-  namespace         = "Tapo/Camera"
-  metric_name       = "PollCycleCompleted"
-  dimensions = {
-    CameraName = each.value
-  }
-  statistic = "Sum"
-  period    = 1800 # 30 minutes — a few missed cycles even
-  # on the slowest (night_mode) interval
+  alarm_name          = "tapo-poller-heartbeat-${each.value}"
+  alarm_description   = "No poll cycle reported for ${each.value} in 30 minutes — poller thread may be dead or hung"
   evaluation_periods  = 1
   threshold           = 1
   comparison_operator = "LessThanThreshold"
   treat_missing_data  = "breaching" # no data = the thread stopped reporting = alarm
+
+  metric_query {
+    id          = "cycles"
+    expression  = "FILL(completed, 0) + FILL(paused, 0)"
+    label       = "Poll cycles run or skipped on purpose"
+    return_data = true
+  }
+
+  metric_query {
+    id = "completed"
+    metric {
+      namespace   = "Tapo/Camera"
+      metric_name = "PollCycleCompleted"
+      dimensions  = { CameraName = each.value }
+      stat        = "Sum"
+      period      = 1800 # 30 minutes — a few missed cycles even on the slowest (night_mode) interval
+    }
+  }
+
+  metric_query {
+    id = "paused"
+    metric {
+      namespace   = "Tapo/Camera"
+      metric_name = "PollCyclePaused"
+      dimensions  = { CameraName = each.value }
+      stat        = "Sum"
+      period      = 1800
+    }
+  }
 
   alarm_actions = [aws_sns_topic.alerts.arn]
   ok_actions    = [aws_sns_topic.alerts.arn]

@@ -21,8 +21,13 @@ cameras:
     ip: 192.168.68.101
     user: camera_admin
     password: yourpassword
+
   - name: c660_street
     ip: 192.168.68.101
     user: camera_admin
     password: yourpassword
     battery_powered: true      # read the battery each poll, emit BatteryPercent
+    auto_pause:                # optional; needs battery_powered
+      pause_below_percent: 35  # stop downloading below this
+      resume_above_percent: 55 # start again above this
+      probe_interval_seconds: 10800  # while paused, check the battery every 3 h
