@@ -30,3 +30,10 @@ provider "aws" {
 }
 
 data "aws_caller_identity" "current" {}
+
+locals {
+  # Created in bootstrap (terraform/bootstrap/workload_boundary.tf), applied
+  # by an admin. Every IAM role and user in this stack must carry it: the
+  # apply role can't create or grant permissions to an unbounded identity.
+  workload_boundary_arn = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:policy/tapo-workload-boundary"
+}

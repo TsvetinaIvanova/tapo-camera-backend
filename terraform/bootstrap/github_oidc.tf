@@ -258,18 +258,19 @@ resource "aws_iam_role_policy" "github_actions_deploy" {
         Resource = "*"
       },
       {
+        # Changes that can only remove or reshape permissions, or that
+        # stay capped by the boundary below (a new tapo-* policy version
+        # still can't exceed the boundary of whoever it's attached to).
         Sid    = "IAM"
         Effect = "Allow"
         Action = [
           "iam:Get*",
           "iam:List*",
-          "iam:CreateRole",
           "iam:DeleteRole",
           "iam:UpdateRole",
           "iam:UpdateAssumeRolePolicy",
           "iam:TagRole",
           "iam:UntagRole",
-          "iam:PutRolePolicy",
           "iam:DeleteRolePolicy",
           "iam:DetachRolePolicy",
           "iam:CreatePolicy",
@@ -278,10 +279,10 @@ resource "aws_iam_role_policy" "github_actions_deploy" {
           "iam:DeletePolicyVersion",
           "iam:TagPolicy",
           "iam:UntagPolicy",
-          "iam:CreateUser",
           "iam:DeleteUser",
           "iam:TagUser",
           "iam:UntagUser",
+          "iam:DeleteUserPolicy",
           "iam:DetachUserPolicy",
           "iam:CreateAccessKey",
           "iam:DeleteAccessKey",
@@ -293,8 +294,31 @@ resource "aws_iam_role_policy" "github_actions_deploy" {
         ]
       },
       {
-        # Only our own policies can be attached. (Lambda roles no longer use
-        # AWSLambdaBasicExecutionRole; modules/lambda scopes logging inline.)
+        # Creating an identity, or granting it permissions, only when it
+        # carries the workload boundary (workload_boundary.tf). This is what
+        # stops CI from making the poller user (or a Lambda role) an admin.
+        Sid    = "IAMBoundedWrites"
+        Effect = "Allow"
+        Action = [
+          "iam:CreateRole",
+          "iam:PutRolePolicy",
+          "iam:PutRolePermissionsBoundary",
+          "iam:CreateUser",
+          "iam:PutUserPolicy",
+          "iam:PutUserPermissionsBoundary",
+        ]
+        Resource = [
+          "arn:aws:iam::${local.account_id}:role/tapo-*",
+          "arn:aws:iam::${local.account_id}:user/${var.poller_user_name}",
+        ]
+        Condition = {
+          StringEquals = { "iam:PermissionsBoundary" = aws_iam_policy.workload_boundary.arn }
+        }
+      },
+      {
+        # Attaching: only our own policies, and only to bounded identities.
+        # (Lambda roles no longer use AWSLambdaBasicExecutionRole;
+        # modules/lambda scopes logging inline.)
         Sid    = "IAMAttach"
         Effect = "Allow"
         Action = [
@@ -311,17 +335,8 @@ resource "aws_iam_role_policy" "github_actions_deploy" {
               "arn:aws:iam::${local.account_id}:policy/tapo-*",
             ]
           }
+          StringEquals = { "iam:PermissionsBoundary" = aws_iam_policy.workload_boundary.arn }
         }
-      },
-      {
-        # Inline policies on the poller user (e.g. tapo-poller-read-overrides)
-        Sid    = "PollerUserInlinePolicies"
-        Effect = "Allow"
-        Action = [
-          "iam:PutUserPolicy",
-          "iam:DeleteUserPolicy",
-        ]
-        Resource = "arn:aws:iam::${local.account_id}:user/${var.poller_user_name}"
       },
       {
         Sid      = "ReadOIDCProvider"
@@ -337,6 +352,31 @@ resource "aws_iam_role_policy" "github_actions_deploy" {
         Condition = {
           StringEquals = { "iam:PassedToService" = "lambda.amazonaws.com" }
         }
+      },
+      {
+        # The boundary only works if CI can't take it off an identity or
+        # loosen the policy itself.
+        Sid    = "ProtectWorkloadBoundary"
+        Effect = "Deny"
+        Action = [
+          "iam:DeleteRolePermissionsBoundary",
+          "iam:DeleteUserPermissionsBoundary",
+        ]
+        Resource = [
+          "arn:aws:iam::${local.account_id}:role/tapo-*",
+          "arn:aws:iam::${local.account_id}:user/${var.poller_user_name}",
+        ]
+      },
+      {
+        Sid    = "ProtectWorkloadBoundaryPolicy"
+        Effect = "Deny"
+        Action = [
+          "iam:CreatePolicyVersion",
+          "iam:DeletePolicy",
+          "iam:DeletePolicyVersion",
+          "iam:SetDefaultPolicyVersion",
+        ]
+        Resource = aws_iam_policy.workload_boundary.arn
       },
       {
         # The CI roles match tapo-* above; never let CI modify or pass them

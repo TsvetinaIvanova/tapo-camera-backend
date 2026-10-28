@@ -12,3 +12,8 @@ output "camera_control_role_arn" {
   description = "Set as the AWS_CAMERA_CONTROL_ROLE_ARN secret of the camera-control environment (camera-override.yml)"
   value       = aws_iam_role.github_actions_camera_control.arn
 }
+
+output "workload_boundary_arn" {
+  description = "Permissions boundary the main stack sets on its roles and the poller user"
+  value       = aws_iam_policy.workload_boundary.arn
+}
