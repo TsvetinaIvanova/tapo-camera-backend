@@ -5,7 +5,7 @@ terraform/bootstrap/.terraform/
 *.tfstate.*
 *.tfplan
 terraform/terraform.tfvars
-terraform/lambda/*/handler.zip
+terraform/lambda/*/*.zip
 
 # Config and state
 poller/config.yaml

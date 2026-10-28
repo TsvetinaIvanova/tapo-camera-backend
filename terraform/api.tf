@@ -24,6 +24,15 @@ resource "aws_apigatewayv2_stage" "tapo" {
   api_id      = aws_apigatewayv2_api.tapo.id
   name        = "$default"
   auto_deploy = true
+
+  # The demo route has no key, so it is the one route anyone can hammer.
+  # The limit is per route, shared by every caller (not per IP): abuse can
+  # make the demo return 429s but can't run up the bill or touch /clips.
+  route_settings {
+    route_key              = aws_apigatewayv2_route.get_demo_clips.route_key
+    throttling_rate_limit  = var.demo_throttle_rate_limit
+    throttling_burst_limit = var.demo_throttle_burst_limit
+  }
 }
 
 resource "aws_apigatewayv2_integration" "clip_query" {
@@ -100,6 +109,95 @@ resource "aws_iam_role_policy" "lambda_query_s3" {
       Resource = [
         "${aws_s3_bucket.camera_clips.arn}/clips/*",
         "${aws_s3_bucket.camera_clips.arn}/thumbnails/*",
+      ]
+    }]
+  })
+}
+
+# ── Keyless demo route ──────────────────────────────────────
+# GET /demo/clips serves only the curated `demo` camera, without a key.
+# It runs the query handler as a separate function so the scope is
+# enforced twice: CAMERA_SCOPE in code, and an IAM role that can only
+# read the demo camera's rows and S3 prefixes. A code bug fails closed
+# (AccessDenied) instead of leaking real footage.
+
+resource "aws_apigatewayv2_integration" "clip_query_demo" {
+  api_id             = aws_apigatewayv2_api.tapo.id
+  integration_type   = "AWS_PROXY"
+  integration_uri    = module.query_demo.invoke_arn
+  integration_method = "POST"
+}
+
+resource "aws_apigatewayv2_route" "get_demo_clips" {
+  api_id             = aws_apigatewayv2_api.tapo.id
+  route_key          = "GET /demo/clips"
+  target             = "integrations/${aws_apigatewayv2_integration.clip_query_demo.id}"
+  authorization_type = "NONE"
+}
+
+resource "aws_lambda_permission" "allow_apigw_demo" {
+  statement_id  = "AllowAPIGatewayInvokeDemo"
+  action        = "lambda:InvokeFunction"
+  function_name = module.query_demo.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_apigatewayv2_api.tapo.execution_arn}/*/GET/demo/clips"
+}
+
+module "query_demo" {
+  source = "./modules/lambda"
+
+  function_name = "tapo-clip-query-demo"
+  source_file   = "${path.module}/lambda/query/handler.py"
+  zip_path      = "${path.module}/lambda/query/handler-demo.zip"
+  timeout       = 15
+  memory_size   = 256
+
+  environment = {
+    DYNAMODB_TABLE       = aws_dynamodb_table.camera_clips.name
+    S3_BUCKET            = aws_s3_bucket.camera_clips.id
+    PRESIGNED_URL_EXPIRY = "3600"
+    CAMERA_SCOPE         = local.demo_camera_id
+    SCOPE_KEY_ROOT       = local.demo_root
+  }
+}
+
+# Only the demo camera's partition, and no GSI (its partition key is the
+# date, which would span every camera).
+resource "aws_iam_role_policy" "lambda_query_demo_dynamodb" {
+  name = "tapo-clip-query-demo-dynamodb"
+  role = module.query_demo.role_name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid      = "ReadDemoClipMetadata"
+      Effect   = "Allow"
+      Action   = ["dynamodb:Query"]
+      Resource = aws_dynamodb_table.camera_clips.arn
+      Condition = {
+        "ForAllValues:StringEquals" = {
+          "dynamodb:LeadingKeys" = [local.demo_camera_id]
+        }
+      }
+    }]
+  })
+}
+
+# Presigned URLs are signed with this role, so a URL for any other
+# camera's footage would be refused by S3.
+resource "aws_iam_role_policy" "lambda_query_demo_s3" {
+  name = "tapo-clip-query-demo-s3"
+  role = module.query_demo.role_name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid    = "GenerateDemoPresignedUrls"
+      Effect = "Allow"
+      Action = ["s3:GetObject"]
+      Resource = [
+        "${aws_s3_bucket.camera_clips.arn}/${local.demo_root}clips/${local.demo_camera_id}/*",
+        "${aws_s3_bucket.camera_clips.arn}/${local.demo_root}thumbnails/${local.demo_camera_id}/*",
       ]
     }]
   })

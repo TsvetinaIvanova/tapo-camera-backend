@@ -66,6 +66,7 @@ def get_row(table, camera_id="c325_back", start_time=CLIP_START):
 
 def test_parse_s3_key(handler):
     assert handler.parse_s3_key(CLIP_KEY) == {
+        "root":       "",
         "camera_id":  "c325_back",
         "date":       "20261008",
         "start_time": CLIP_START,
@@ -83,6 +84,9 @@ def test_parse_s3_key(handler):
     "clips/c325_back/20261008/c325_back_112948_longs.mp4",     # duration is not a number
     "clips/c325_back/20261008/c325_back_256199_64s.mp4",       # impossible time
     "clips/c325_back/2026-10-08/c325_back_112948_64s.mp4",     # wrong date format
+    "clips/demo/20261008/demo_112948_64s.mp4",                 # demo camera outside the demo root
+    "demo/clips/c325_back/20261008/c325_back_112948_64s.mp4",  # real camera in the demo root (never expires)
+    "demo/thumbnails/demo/20261008/demo_112948_64s.jpg",       # not under demo/clips/
 ])
 def test_parse_s3_key_rejects_unexpected_keys(handler, key):
     with pytest.raises(ValueError):
@@ -213,3 +217,30 @@ def test_every_record_in_a_batch_is_processed(handler, bucket, table, ffmpeg):
 
 def test_event_without_records(handler):
     assert handler.lambda_handler({}, None) == {"statusCode": 200, "body": "ok"}
+
+
+# ── Demo root ───────────────────────────────────────────────
+
+DEMO_CLIP_KEY = "demo/clips/demo/20261008/demo_112948_64s.mp4"
+DEMO_THUMB_KEY = "demo/thumbnails/demo/20261008/demo_112948_64s.jpg"
+
+
+def test_parse_s3_key_demo_root(handler):
+    parsed = handler.parse_s3_key(DEMO_CLIP_KEY)
+
+    assert parsed["root"] == "demo/"
+    assert parsed["camera_id"] == "demo"
+    assert parsed["start_time"] == CLIP_START
+
+
+def test_demo_clip_thumbnail_stays_in_demo_root_and_row_has_no_ttl(handler, bucket, table, ffmpeg):
+    bucket.put_object(Bucket=BUCKET, Key=DEMO_CLIP_KEY, Body=CLIP_BODY)
+    ffmpeg(0)
+
+    handler.lambda_handler(s3_event(DEMO_CLIP_KEY), None)
+
+    bucket.head_object(Bucket=BUCKET, Key=DEMO_THUMB_KEY)
+    row = get_row(table, camera_id="demo")
+    assert row["processing_status"] == "complete"
+    assert row["thumbnail_s3_key"] == DEMO_THUMB_KEY
+    assert "ttl" not in row, "demo rows must not expire"

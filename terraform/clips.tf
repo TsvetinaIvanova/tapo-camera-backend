@@ -1,5 +1,16 @@
 # ── Clips bucket ────────────────────────────────────────────
 
+# Real footage: clips/{camera}/... and thumbnails/{camera}/..., expired by
+# the lifecycle below. The curated demo camera lives under its own root,
+# demo/clips/demo/... and demo/thumbnails/demo/..., which the lifecycle
+# deliberately doesn't cover (S3 lifecycle filters can't exclude a
+# sub-prefix). That keeps retention fail-closed: anything under clips/
+# expires, with no per-camera list to keep in sync with the Pi.
+locals {
+  demo_camera_id = "demo"
+  demo_root      = "demo/"
+}
+
 resource "aws_s3_bucket" "camera_clips" {
   bucket = var.bucket_name
 }
@@ -70,6 +81,21 @@ resource "aws_s3_bucket_lifecycle_configuration" "camera_clips" {
 
     expiration {
       days = var.clips_ttl_days
+    }
+
+    noncurrent_version_expiration {
+      noncurrent_days = 7
+    }
+  }
+
+  # Demo footage is kept until deleted by hand; only replaced or deleted
+  # versions expire, so re-uploads don't pile up.
+  rule {
+    id     = "demo-noncurrent-versions"
+    status = "Enabled"
+
+    filter {
+      prefix = local.demo_root
     }
 
     noncurrent_version_expiration {

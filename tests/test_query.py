@@ -20,15 +20,16 @@ def handler(bucket, table, monkeypatch):
 
 
 def put_clip(table, camera_id, start_time, date="20261008", thumbnail=True):
+    root = "demo/" if camera_id == "demo" else ""  # where the processor puts each camera
     item = {
         "camera_id": camera_id,
         "start_time": start_time,
         "date": date,
         "duration_s": 10,
-        "s3_key": f"clips/{camera_id}/{date}/{camera_id}_{start_time}.mp4",
+        "s3_key": f"{root}clips/{camera_id}/{date}/{camera_id}_{start_time}.mp4",
     }
     if thumbnail:
-        item["thumbnail_s3_key"] = f"thumbnails/{camera_id}/{date}/{camera_id}_{start_time}.jpg"
+        item["thumbnail_s3_key"] = f"{root}thumbnails/{camera_id}/{date}/{camera_id}_{start_time}.jpg"
     table.put_item(Item=item)
 
 
@@ -143,3 +144,89 @@ def test_api_key_is_not_logged(handler, caplog):
     assert "x-api-key" not in caplog.text
     # The query itself is still logged, for debugging.
     assert "20261008" in caplog.text and "c325_back" in caplog.text
+
+
+# ── Demo route: the same handler with CAMERA_SCOPE=demo ─────────────────────
+
+
+@pytest.fixture
+def demo_handler(bucket, table, monkeypatch):
+    monkeypatch.setenv("DYNAMODB_TABLE", TABLE)
+    monkeypatch.setenv("S3_BUCKET", BUCKET)
+    monkeypatch.setenv("CAMERA_SCOPE", "demo")
+    monkeypatch.setenv("SCOPE_KEY_ROOT", "demo/")
+    return load_handler("query")
+
+
+def put_real_and_demo_clips(table):
+    for camera in ("c225_garage", "c325_back", "c325_porch", "c660_street"):
+        put_clip(table, camera, DAY + 100)
+    put_clip(table, "demo", DAY + 200)
+    put_clip(table, "demo", DAY + 86400 + 300, date="20261009")
+
+
+@pytest.mark.parametrize("params", [
+    {},
+    {"date": "20261008"},
+    {"camera": "c660_street"},
+    {"date": "20261008", "camera": "c660_street"},
+    {"camera": ""},
+])
+def test_demo_never_returns_another_camera(demo_handler, table, params):
+    put_real_and_demo_clips(table)
+
+    status, body = get(demo_handler, **params)
+
+    assert status == 200
+    assert body["clips"], "expected the demo clips"
+    for clip in body["clips"]:
+        assert clip["camera_id"] == "demo"
+        assert f"/{clip['s3_key']}?" in clip["video_url"] and clip["s3_key"].startswith("demo/clips/demo/")
+        assert f"/{clip['thumbnail_s3_key']}?" in clip["thumbnail_url"]
+        assert clip["thumbnail_s3_key"].startswith("demo/thumbnails/demo/")
+
+
+def test_demo_without_date_returns_newest_first(demo_handler, table):
+    put_real_and_demo_clips(table)
+
+    status, body = get(demo_handler)
+
+    assert status == 200
+    assert body["date"] is None
+    assert [c["start_time"] for c in body["clips"]] == [DAY + 86400 + 300, DAY + 200]
+
+
+def test_demo_without_date_is_capped(demo_handler, table):
+    for i in range(demo_handler.DEMO_LIMIT + 5):
+        put_clip(table, "demo", DAY + i)
+
+    assert get(demo_handler)[1]["count"] == demo_handler.DEMO_LIMIT
+
+
+def test_demo_still_validates_the_date(demo_handler):
+    assert get(demo_handler, date="2026-10-08") == (400, {"error": "date must be in YYYYMMDD format"})
+
+
+def test_demo_drops_a_row_pointing_outside_its_prefix(demo_handler, table):
+    # A demo row whose keys point at real footage (bad data, or a bug in
+    # whatever wrote it) must not get a URL.
+    table.put_item(Item={
+        "camera_id": "demo",
+        "start_time": DAY + 100,
+        "date": "20261008",
+        "s3_key": "clips/c660_street/20261008/c660_street_1.mp4",
+        "thumbnail_s3_key": "demo/thumbnails/demo/20261008/demo_1.jpg",
+    })
+    # Right camera, but outside the demo root: it would expire, and the
+    # demo role can't read it.
+    table.put_item(Item={
+        "camera_id": "demo",
+        "start_time": DAY + 150,
+        "date": "20261008",
+        "s3_key": "clips/demo/20261008/demo_150.mp4",
+    })
+    put_clip(table, "demo", DAY + 200)
+
+    clips = get(demo_handler, date="20261008")[1]["clips"]
+
+    assert [c["start_time"] for c in clips] == [DAY + 200]
