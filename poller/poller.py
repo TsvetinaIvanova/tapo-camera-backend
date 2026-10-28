@@ -157,7 +157,9 @@ def make_cloudwatch_client(profile: str, region: str):
     return session.client("cloudwatch")
 
 
-def emit_metric(cloudwatch_client, metric_name: str, camera_name: str, value: float = 1.0) -> None:
+def emit_metric(
+    cloudwatch_client, metric_name: str, camera_name: str, value: float = 1.0, unit: str = "Count"
+) -> None:
     """
     Push a heartbeat/error metric to CloudWatch. Failures here are logged
     but never raised — a metrics outage must never take down the poller
@@ -171,7 +173,7 @@ def emit_metric(cloudwatch_client, metric_name: str, camera_name: str, value: fl
                     "MetricName": metric_name,
                     "Dimensions": [{"Name": "CameraName", "Value": camera_name}],
                     "Value": value,
-                    "Unit": "Count",
+                    "Unit": unit,
                 }
             ],
         )
@@ -296,6 +298,29 @@ def persist_clip_progress(
             save_state(state_file, full_state)
 
 
+async def report_battery(loop, tapo, camera_name: str, cloudwatch_client=None) -> None:
+    """
+    Log and emit the battery level of a battery-powered camera. Reuses the
+    session poll_camera already opened, so it costs no extra wake. Best-effort:
+    a failure is logged and ignored, never counted as a poll error, and never
+    blocks the downloads that follow.
+    """
+    try:
+        response = await loop.run_in_executor(None, tapo.getBatteryStatus)
+        status = response["battery"]["status"]
+        percent = status["battery_percent"]
+    except Exception as e:
+        logger.warning(f"  ⚠️  [{camera_name}] Could not read battery status: {e}")
+        return
+
+    logger.info(
+        f"  🔋  [{camera_name}] Battery {percent}% "
+        f"(charging: {status.get('battery_charging')}, {status.get('battery_temperature')}°C)"
+    )
+    if cloudwatch_client:
+        emit_metric(cloudwatch_client, "BatteryPercent", camera_name, percent, unit="Percent")
+
+
 # ── Camera poll (single pass, one camera) ────────────────
 async def poll_camera(
     camera: dict,
@@ -336,6 +361,9 @@ async def poll_camera(
         if cloudwatch_client:
             emit_metric(cloudwatch_client, "PollCycleErrors", name)
         return state
+
+    if camera.get("battery_powered"):
+        await report_battery(loop, tapo, name, cloudwatch_client)
 
     # Determine date range to check — today + yesterday to catch midnight boundary
     now = datetime.now(timezone.utc)

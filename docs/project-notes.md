@@ -92,6 +92,16 @@ Settled; don't re-litigate. Small leftovers from "Small cleanups" can be slotted
 4. **SLOs and error budgets.** SLIs: poll success ratio per camera (`PollCycleCompleted` vs `PollCycleErrors`), and clip freshness. Burn-rate alarms and a dashboard.
 5. **Agentic AI layer**, starting with the incident-response agent, **triggered by the SLO burn alerts** and investigating with the same metrics and logs. It comes after SLOs because the agent is only as good as the signals it reasons over. Natural-language query agent later.
 
+## C660 battery (side track, started 2026-10-28)
+
+The C660 ran low after cloudy days; goal is to save its battery remotely, without SSH to the Pi.
+
+- pytapo's `getBatteryStatus()` works on the C660 (checked once by hand): `battery_percent`, `power_mode: SOLAR`, `battery_charging` (`NORMAL` seen; other values not yet), `battery_voltage`, `battery_temperature` (6 °C at the time: Li-ion barely charges near 0 °C, so winter may limit solar charging regardless of sky).
+- All three steps go in one branch and PR, `c660-battery`.
+- Step 1: cameras with `battery_powered: true` read the battery in the session the poller already opens (no extra wake), log it, and emit `BatteryPercent` (best-effort, never a poll error). Alarm `tapo-battery-low-c660_street` below `battery_low_threshold_percent` (25, below the auto-pause threshold, so it fires only when pausing hasn't stopped the drain). Purpose besides alerting: measure whether polling is a meaningful share of the drain (the camera keeps recording while unpolled) before building a pause.
+- Step 2: manual pause via an SSM parameter holding a "paused until" time (auto-expires), read by the poller before each cycle, set by a `workflow_dispatch` workflow (phone-friendly, audited, OIDC) with its own role scoped to that parameter path. Needs `ssm:GetParameter` on the poller user. Heartbeat alarm must count a `PollCyclePaused` metric, or a pause pages.
+- Step 3, only if step 1's data says polling matters: auto-pause with a gap between thresholds (pause below 35%, resume above 55%; the alarm stays at 25%; decided 2026-10-28; the C660 drains fast, hence the high pause threshold), resumed by a short battery-only probe session or a timer. The manual flag overrides it both ways.
+
 ## Backlog (rough priority, after the agreed order)
 
 1. **Rekognition person detection** (`has_person` defaults to `"unknown"`); no GSI needed, Scan + FilterExpression is fine at this scale.

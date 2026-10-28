@@ -78,3 +78,9 @@ variable "processor_image_digest" {
     error_message = "processor_image_digest must look like sha256:<64 hex>."
   }
 }
+
+variable "battery_low_threshold_percent" {
+  description = "Alarm when a battery-powered camera reports a battery level below this"
+  type        = number
+  default     = 25 # below the auto-pause threshold (35), so it fires only when pausing hasn't stopped the drain
+}

@@ -63,7 +63,7 @@ docs/              project-notes.md (decisions, history, backlog)
 - One thread per camera, each with its own long-lived event loop (not recreated per cycle; avoids "Task was destroyed but it is pending" from pytapo's async generators).
 - Per-camera `interval_seconds` plus optional `night_mode` (slower interval, never zero, so there is no huge dawn backlog). C660's battery drain is driven by session length and wake count, so keep its backlog small.
 - Startup is staggered (8s per camera). State file is lock-guarded and written after every uploaded clip (`persist_clip_progress`), so a restart resumes mid-cycle.
-- Emits `PollCycleCompleted` and `PollCycleErrors` per camera via `put_metric_data`, and ships all logs to CloudWatch Logs via `watchtower`. Both are best-effort and must never block or crash uploads.
+- Emits `PollCycleCompleted` and `PollCycleErrors` per camera (plus `BatteryPercent` for cameras with `battery_powered: true`, read in the existing session) via `put_metric_data`, and ships all logs to CloudWatch Logs via `watchtower`. Both are best-effort and must never block or crash uploads.
 - Runs as systemd unit `tapo-poller` with `StateDirectory=tapo-poller` (state at `/var/lib/tapo-poller/state.json`). Verify the deployed paths and user with `systemctl cat tapo-poller`. Logs: `journalctl -u tapo-poller -f`.
 
 ## Conventions

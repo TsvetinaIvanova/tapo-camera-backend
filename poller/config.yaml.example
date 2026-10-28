@@ -21,3 +21,8 @@ cameras:
     ip: 192.168.68.101
     user: camera_admin
     password: yourpassword
+  - name: c660_street
+    ip: 192.168.68.101
+    user: camera_admin
+    password: yourpassword
+    battery_powered: true      # read the battery each poll, emit BatteryPercent
