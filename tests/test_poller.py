@@ -1,5 +1,6 @@
 """
-Tests for the poller's pause logic: the SSM override and battery auto-pause.
+Tests for the poller's pause logic (the SSM override and battery auto-pause)
+and for the CloudWatch log shipping setup.
 
 pytapo isn't a test dependency (and must never reach a real camera here), so
 it is replaced with a stub module before poller.py is imported. Tapo itself
@@ -9,6 +10,7 @@ is swapped for a fake per test.
 import asyncio
 import importlib.util
 import json
+import logging
 import pathlib
 import sys
 import types
@@ -257,3 +259,30 @@ def test_poll_override_downloads_while_auto_paused(poller, fake_tapo, tmp_path):
     state = run_poll(poller, tmp_path, {}, force_poll=True)
     assert state[CAMERA]["auto_paused"] is True
     assert fake_tapo.recordings_calls == 2
+
+
+# ── CloudWatch log shipping setup ────────────────────────
+class FakeLogHandler(logging.Handler):
+    def __init__(self, **kwargs):
+        super().__init__()
+        self.kwargs = kwargs
+
+    def emit(self, record):
+        pass
+
+
+def test_log_shipping_setup_makes_no_aws_calls(poller, monkeypatch):
+    # Setup runs once, often before the internet is back after a power cut.
+    # In watchtower these options are API calls in the handler's constructor.
+    monkeypatch.setitem(sys.modules, "watchtower", types.SimpleNamespace(CloudWatchLogHandler=FakeLogHandler))
+    before = set(logging.getLogger().handlers)
+    poller.setup_cloudwatch_logging(None, "eu-central-1", "tapo-poller")
+    added = set(logging.getLogger().handlers) - before
+    for handler in added:
+        logging.getLogger().removeHandler(handler)
+
+    assert len(added) == 1
+    kwargs = added.pop().kwargs
+    assert kwargs["create_log_group"] is False
+    assert not kwargs.get("log_group_tags")
+    assert not kwargs.get("log_group_retention_days")

@@ -171,3 +171,31 @@ resource "aws_cloudwatch_metric_alarm" "battery_low" {
   alarm_actions = [aws_sns_topic.alerts.arn]
   ok_actions    = [aws_sns_topic.alerts.arn]
 }
+
+# ── Poller log shipping alarm ───────────────────────────────
+
+# Fires when the poller's log group stops receiving events. Metrics and logs
+# reach AWS separately, so the poller can keep polling (heartbeats fine)
+# while its logs silently stop: this happened twice, after the Pi booted
+# before the internet was back. The poller logs every poll cycle, so an
+# hour without events means shipping is broken (or the whole poller is
+# down, which the heartbeat alarms also report). IncomingLogEvents is a
+# free vended metric; the alarm is one alarm metric.
+resource "aws_cloudwatch_metric_alarm" "poller_logs_silent" {
+  alarm_name        = "tapo-poller-logs-silent"
+  alarm_description = "No log events from the poller in 60 minutes: log shipping is broken, or the poller is down (check the heartbeat alarms)"
+  namespace         = "AWS/Logs"
+  metric_name       = "IncomingLogEvents"
+  dimensions = {
+    LogGroupName = aws_cloudwatch_log_group.poller.name
+  }
+  statistic           = "Sum"
+  period              = 3600 # longer than the slowest night_mode interval
+  evaluation_periods  = 1
+  threshold           = 1
+  comparison_operator = "LessThanThreshold"
+  treat_missing_data  = "breaching" # vended metric has no datapoint when nothing arrives
+
+  alarm_actions = [aws_sns_topic.alerts.arn]
+  ok_actions    = [aws_sns_topic.alerts.arn]
+}
