@@ -435,3 +435,53 @@ resource "aws_iam_role_policy" "github_actions_camera_control" {
     }]
   })
 }
+
+# ── Image-pull role: ci.yml's processor image job ─────────
+# Lets CI pull the processor's base image from ECR Public as an
+# authenticated user. Anonymous pulls are throttled per source IP, and
+# GitHub-hosted runners share IPs, so CI builds failed on 429s for minutes
+# at a time. Only this permission: the job builds PR code, so it gets
+# neither the plan role (ReadOnlyAccess reads the API secret and the state)
+# nor anything that writes. Dependabot PRs can't read the role ARN secret
+# and stay anonymous.
+resource "aws_iam_role" "github_actions_image_pull" {
+  name = "tapo-github-actions-image-pull"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Principal = {
+        Federated = aws_iam_openid_connect_provider.github.arn
+      }
+      Action = "sts:AssumeRoleWithWebIdentity"
+      Condition = {
+        StringEquals = {
+          "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
+          "token.actions.githubusercontent.com:sub" = [local.sub_main, local.sub_pr]
+        }
+      }
+    }]
+  })
+}
+
+resource "aws_iam_role_policy" "github_actions_image_pull" {
+  name = "tapo-github-actions-image-pull"
+  role = aws_iam_role.github_actions_image_pull.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      # Same as the apply role's ECRPublicAuthToken: neither action supports
+      # resource-level scoping, and a condition on sts:AWSServiceName always
+      # denies (ECR Public checks the STS action without that key).
+      Sid    = "ECRPublicAuthToken"
+      Effect = "Allow"
+      Action = [
+        "ecr-public:GetAuthorizationToken",
+        "sts:GetServiceBearerToken",
+      ]
+      Resource = "*"
+    }]
+  })
+}

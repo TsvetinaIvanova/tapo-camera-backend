@@ -13,6 +13,11 @@ output "camera_control_role_arn" {
   value       = aws_iam_role.github_actions_camera_control.arn
 }
 
+output "image_pull_role_arn" {
+  description = "Set as the AWS_IMAGE_PULL_ROLE_ARN GitHub secret (ci.yml, processor image job)"
+  value       = aws_iam_role.github_actions_image_pull.arn
+}
+
 output "workload_boundary_arn" {
   description = "Permissions boundary the main stack sets on its roles and the poller user"
   value       = aws_iam_policy.workload_boundary.arn
