@@ -55,9 +55,12 @@ def setup_cloudwatch_logging(profile: str, region: str, log_group: str) -> None:
     Attached to the root logger (not just "tapo-poller") so it's
     inclusive of everything running in this process.
 
-    Best-effort: if this fails at startup (no network yet, package not
-    installed, bad IAM perms), log a warning and keep running without
-    it rather than refusing to start the poller over a logging feature.
+    Best-effort: if this fails at startup (package not installed, bad
+    profile), log a warning and keep running without it rather than
+    refusing to start the poller over a logging feature. Nothing here may
+    call AWS: setup runs once, often right after a power cut, before the
+    internet is back. Sends that fail later are dropped by watchtower's
+    own thread, which keeps going.
     """
     try:
         import watchtower
@@ -67,7 +70,9 @@ def setup_cloudwatch_logging(profile: str, region: str, log_group: str) -> None:
             boto3_client=session.client("logs"),
             log_group_name=log_group,
             log_stream_name=socket.gethostname(),
-            create_log_group=True,
+            # Terraform owns the group (poller.tf). Creating it (or setting
+            # tags or retention here) is an API call in the constructor.
+            create_log_group=False,
             send_interval=10,   # batch and flush at most every 10s
         )
         handler.setFormatter(logging.Formatter(
