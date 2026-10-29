@@ -25,7 +25,7 @@ terraform/         main stack, flat, one file per component:
                    monitoring.tf
 terraform/modules/lambda/  generic Python Lambda: single-file zip or digest-pinned container image, role (requires `permissions_boundary`) with logging scoped to its own log group, log group, function.
                    Per-function least-privilege policies stay in the caller (attached to module.<x>.role_name)
-terraform/bootstrap/  separate state: GitHub OIDC provider + CI plan/apply/camera-control roles, `tapo-workload-boundary`
+terraform/bootstrap/  separate state: GitHub OIDC provider + CI plan/apply/image-pull/camera-control roles, `tapo-workload-boundary`
                    (workload_boundary.tf); applied locally by admin, never from CI
 terraform/lambda/  processor/handler.py  query/handler.py  authorizer/handler.py
                    processor/Dockerfile (minimal static ffmpeg built from source + handler; ECR `tapo-clip-processor`), requirements.txt,
@@ -49,7 +49,7 @@ docs/              project-notes.md (decisions, history, backlog)
 - Region `eu-central-1`; TF state in S3 `tapo-cameras-backend-tf-state` (S3-native locking, `use_lockfile = true`)
 - CloudWatch: namespace `Tapo/Camera`, log group `tapo-poller`, alarm `tapo-no-uploads-1h`, SNS topic `tapo-camera-alerts`
 - AWS profile on the Pi: `tapo-poller` (IAM user, deliberately kept as a long-lived least-privilege user)
-- GitHub OIDC role: `tapo-github-actions`, secret `AWS_ROLE_ARN`; camera-override role `tapo-github-actions-camera-control` (trusts only the `camera-control` environment, secret `AWS_CAMERA_CONTROL_ROLE_ARN` there)
+- GitHub OIDC role: `tapo-github-actions`, secret `AWS_ROLE_ARN`; image-pull role `tapo-github-actions-image-pull` (ci.yml's processor image job, ECR Public login only, secret `AWS_IMAGE_PULL_ROLE_ARN`); camera-override role `tapo-github-actions-camera-control` (trusts only the `camera-control` environment, secret `AWS_CAMERA_CONTROL_ROLE_ARN` there)
 - Polling overrides: SSM `/tapo/poller/override/<camera>` (runtime state written by camera-override.yml, not Terraform)
 
 ## pytapo 3.4.14 rules (hard-won, do not deviate)

@@ -71,13 +71,35 @@ jobs:
       - name: Run tests
         run: python -m pytest -v
 
-  # ── Processor image: build + smoke test (no AWS) ────────
+  # ── Processor image: build + smoke test ─────────────────
   processor-image:
     name: Processor image
     runs-on: ubuntu-latest
+    permissions:
+      id-token: write   # required for OIDC
+      contents: read
 
     steps:
       - uses: actions/checkout@v6
+
+      # ECR Public throttles anonymous pulls per source IP, and runners
+      # share IPs, so the base image's manifest fetch got 429s for minutes
+      # at a time. Log in as the image-pull role, which can only get an ECR
+      # Public token. Dependabot PRs can't read the role ARN secret, so they
+      # stay anonymous (same reason tf-plan skips them).
+      - name: Configure AWS credentials (OIDC)
+        if: github.actor != 'dependabot[bot]'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_IMAGE_PULL_ROLE_ARN }}
+          aws-region: eu-central-1
+          mask-aws-account-id: true
+
+      - name: Log in to ECR Public
+        if: github.actor != 'dependabot[bot]'
+        uses: aws-actions/amazon-ecr-login@v2
+        with:
+          registry-type: public
 
       - uses: docker/setup-buildx-action@v4
 
@@ -85,11 +107,8 @@ jobs:
       # unless the Dockerfile's build stage changes.
       # No build record or job summary, matching deploy.yml (nothing
       # sensitive here, but the build is the same).
-      # ECR Public rate-limits anonymous pulls per IP, and runners share IPs,
-      # so the base image's manifest fetch sometimes gets a 429. Unlike
-      # deploy.yml, this job has no AWS credentials to log in with
-      # (Dependabot PRs can't have any), so retry once after a pause; a
-      # second failure fails the job.
+      # Retry once after a pause, mainly for Dependabot PRs' anonymous
+      # pulls; a second failure fails the job.
       - name: Build image
         id: build
         continue-on-error: true
