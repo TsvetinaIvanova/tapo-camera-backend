@@ -85,11 +85,14 @@ jobs:
       # unless the Dockerfile's build stage changes.
       # No build record or job summary, matching deploy.yml (nothing
       # sensitive here, but the build is the same).
-      # ECR Public rate-limits anonymous pulls per IP, and runners share IPs,
-      # so the base image's manifest fetch sometimes gets a 429. Unlike
-      # deploy.yml, this job has no AWS credentials to log in with
-      # (Dependabot PRs can't have any), so retry once after a pause; a
-      # second failure fails the job.
+      # ECR Public rate-limits anonymous pulls per IP, per second, and
+      # runners share IPs, so the base image's manifest fetch often gets a
+      # 429. Unlike deploy.yml, this job has no AWS credentials to log in
+      # with (Dependabot PRs can't have any), so the build is tried up to
+      # four times, waiting 30, 60 and 120 s in between; the last failure
+      # fails the job. It's a per-second limit, so the number of attempts
+      # matters more than the waits. A real build error also gets retried,
+      # but fails fast from cache.
       - name: Build image
         id: build
         continue-on-error: true
@@ -106,10 +109,48 @@ jobs:
 
       - name: Wait before retrying the build
         if: steps.build.outcome == 'failure'
+        run: sleep 30
+
+      - name: Build image (retry 1)
+        id: build_retry_1
+        if: steps.build.outcome == 'failure'
+        continue-on-error: true
+        uses: docker/build-push-action@v7
+        env:
+          DOCKER_BUILD_SUMMARY: false
+          DOCKER_BUILD_RECORD_UPLOAD: false
+        with:
+          context: terraform/lambda/processor
+          tags: tapo-clip-processor:ci
+          load: true
+          cache-from: type=gha,scope=processor
+          cache-to: type=gha,mode=max,scope=processor
+
+      - name: Wait before retrying the build again
+        if: steps.build_retry_1.outcome == 'failure'
         run: sleep 60
 
-      - name: Build image (retry)
-        if: steps.build.outcome == 'failure'
+      - name: Build image (retry 2)
+        id: build_retry_2
+        if: steps.build_retry_1.outcome == 'failure'
+        continue-on-error: true
+        uses: docker/build-push-action@v7
+        env:
+          DOCKER_BUILD_SUMMARY: false
+          DOCKER_BUILD_RECORD_UPLOAD: false
+        with:
+          context: terraform/lambda/processor
+          tags: tapo-clip-processor:ci
+          load: true
+          cache-from: type=gha,scope=processor
+          cache-to: type=gha,mode=max,scope=processor
+
+      - name: Wait before the last build attempt
+        if: steps.build_retry_2.outcome == 'failure'
+        run: sleep 120
+
+      - name: Build image (retry 3)
+        if: steps.build_retry_2.outcome == 'failure'
         uses: docker/build-push-action@v7
         env:
           DOCKER_BUILD_SUMMARY: false
