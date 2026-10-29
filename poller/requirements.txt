@@ -3,6 +3,6 @@
 # only make this file disagree with the Pi. Upgrade on the Pi, then update.
 # watchtower: poller.py relies on CloudWatchLogHandler(create_log_group=False)
 # making no API calls at construction (true in 3.4.0); recheck when bumping.
-boto3==1.43.40
+boto3==1.43.118
 pytapo==3.4.17
 watchtower==3.4.0
