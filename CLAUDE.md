@@ -1,6 +1,6 @@
 # Tapo Camera Backend
 
-Portfolio project for remote EU SRE/DevOps/Cloud roles. Everything should be defensible in an interview: least privilege, IaC for all AWS resources, CI/CD via OIDC, observable failure modes. Be direct and practical, flag tradeoffs honestly, and push back if something doesn't fit.
+A personal system run to production standards. Every design choice should be explainable on its merits: least privilege, IaC for all AWS resources, CI/CD via OIDC, observable failure modes. Be direct and practical, flag tradeoffs honestly, and push back if something doesn't fit.
 
 ## What it does
 
