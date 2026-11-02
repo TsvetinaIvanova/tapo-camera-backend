@@ -219,6 +219,29 @@ def upload_to_s3(
         return False
 
 
+# ── Clip dates ────────────────────────────────────────────
+def recording_search_dates(now: datetime) -> list[str]:
+    """
+    The dates to pass to getRecordings: yesterday and today in `now`'s zone.
+
+    Cameras file recordings under their local date, so this expects the Pi's
+    local time and assumes the Pi and the cameras share a time zone. UTC dates
+    would miss clips from local midnight until UTC's midnight.
+    """
+    return [
+        (now - timedelta(days=1)).strftime("%Y%m%d"),
+        now.strftime("%Y%m%d"),
+    ]
+
+
+def clip_utc_date(start_time: int) -> str:
+    """
+    The UTC date of a clip, for its S3 key. The filename's time is UTC, and the
+    processor rebuilds start_time from both, so the date must be UTC as well.
+    """
+    return datetime.fromtimestamp(start_time, timezone.utc).strftime("%Y%m%d")
+
+
 # ── Download ──────────────────────────────────────────────
 async def download_clip(
     tapo: Tapo,
@@ -537,11 +560,7 @@ async def poll_camera(
             logger.info(f"  ⏩  [{name}] Auto-paused, but a poll override is active: downloading")
 
     # Determine date range to check — today + yesterday to catch midnight boundary
-    now = datetime.now(timezone.utc)
-    dates = [
-        (now - timedelta(days=1)).strftime("%Y%m%d"),
-        now.strftime("%Y%m%d"),
-    ]
+    dates = recording_search_dates(datetime.now().astimezone())
 
     last_seen = state.get(name, {}).get("last_start_time", 0)
     new_last_seen = last_seen
@@ -581,7 +600,9 @@ async def poll_camera(
             )
 
             if local_path and os.path.exists(local_path):
-                success = upload_to_s3(s3_client, local_path, bucket, name, date)
+                success = upload_to_s3(
+                    s3_client, local_path, bucket, name, clip_utc_date(clip["startTime"])
+                )
 
                 if success:
                     os.remove(local_path)
