@@ -261,6 +261,45 @@ def test_poll_override_downloads_while_auto_paused(poller, fake_tapo, tmp_path):
     assert fake_tapo.recordings_calls == 2
 
 
+# ── Clip dates ───────────────────────────────────────────
+
+def test_recordings_are_searched_by_local_date(poller):
+    # 00:30 on Oct 31 in Sofia is still Oct 30 in UTC.
+    now = datetime(2026, 10, 31, 0, 30, tzinfo=timezone(timedelta(hours=2)))
+    assert poller.recording_search_dates(now) == ["20261030", "20261031"]
+
+
+class RecordingS3:
+    def __init__(self):
+        self.keys = []
+
+    def upload_file(self, local_path, bucket, key):
+        self.keys.append(key)
+
+
+def test_clip_key_uses_the_utc_date_of_the_clip(poller, fake_tapo, tmp_path, monkeypatch):
+    # Recorded at 00:02 local on Oct 31, so the camera lists it under Oct 31,
+    # but its filename says 22:02 UTC, which was still Oct 30.
+    start = int(datetime(2026, 10, 30, 22, 2, 12, tzinfo=timezone.utc).timestamp())
+    clip = {"startTime": start, "endTime": start + 66}
+    listings = iter([[], [{"search_video_results_0": clip}]])
+    monkeypatch.setattr(fake_tapo, "getRecordings", lambda self, date: next(listings))
+
+    async def fake_download(tapo, clip, time_correction, output_dir, camera_name):
+        path = tmp_path / f"{camera_name}_220212_66s.mp4"
+        path.touch()
+        return str(path)
+
+    monkeypatch.setattr(poller, "download_clip", fake_download)
+    s3 = RecordingS3()
+    state = asyncio.run(poller.poll_camera(
+        {"name": CAMERA, "ip": "192.0.2.1", "user": "u", "password": "p"},
+        {"aws": {"bucket": "unused"}}, {}, s3, str(tmp_path),
+    ))
+    assert s3.keys == [f"clips/{CAMERA}/20261030/{CAMERA}_220212_66s.mp4"]
+    assert state[CAMERA]["last_start_time"] == start
+
+
 # ── CloudWatch log shipping setup ────────────────────────
 class FakeLogHandler(logging.Handler):
     def __init__(self, **kwargs):

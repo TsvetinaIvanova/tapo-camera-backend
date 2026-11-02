@@ -700,8 +700,7 @@
   }
 
   function clipRow(clip) {
-    const startDt  = new Date(clip.start_time * 1000);
-    const timeStr  = startDt.toTimeString().slice(0, 8);
+    const timeStr  = formatUtcTime(clip.start_time);
     const duration = clip.duration_s ? `${clip.duration_s}s` : "—";
     const fileSize = clip.file_size_bytes ? formatBytes(clip.file_size_bytes) : "";
     const status   = clip.processing_status || "unknown";
@@ -739,9 +738,8 @@
     const video = document.getElementById("modal-video");
     const title = document.getElementById("modal-title");
     const meta  = document.getElementById("modal-meta");
-    const dt    = new Date(clip.start_time * 1000);
 
-    title.textContent = `${clip.camera_id} · ${dt.toTimeString().slice(0, 8)} UTC`;
+    title.textContent = `${clip.camera_id} · ${formatUtcTime(clip.start_time)} UTC`;
 
     if (clip.video_url) { video.src = clip.video_url; video.style.display = "block"; }
     else                { video.style.display = "none"; }
@@ -772,6 +770,10 @@
   function setStatus(msg, type = "") {
     statusEl.innerHTML = msg;
     statusEl.className = "status" + (type ? " " + type : "");
+  }
+
+  function formatUtcTime(epochSeconds) {
+    return new Date(epochSeconds * 1000).toISOString().slice(11, 19);
   }
 
   function formatDate(yyyymmdd) {

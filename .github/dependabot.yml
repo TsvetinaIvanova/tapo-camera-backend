@@ -1,6 +1,8 @@
 # Keeps the processor image's pins current: the digest-pinned base image
 # (which also carries Debian security updates) and the pinned pip packages.
 # Also the test dependencies in /requirements-dev.txt.
+# The root entry also picks up poller/requirements.txt, whose pins follow the
+# hand-deployed Pi, so they're ignored here.
 version: 2
 updates:
   - package-ecosystem: docker
@@ -17,3 +19,6 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    ignore:
+      - dependency-name: pytapo
+      - dependency-name: watchtower

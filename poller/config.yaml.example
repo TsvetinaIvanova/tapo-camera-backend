@@ -1,5 +1,5 @@
 # Copy to config.yaml and fill in your values.
-# config.yaml is gitignored — never commit real credentials.
+# config.yaml is gitignored: never commit real credentials.
 
 aws:
   profile: tapo-poller
@@ -7,18 +7,25 @@ aws:
   region: eu-central-1
 
 poller:
-  interval_seconds: 900        # 15 minutes
-  lookback_hours: 1            # how far back to check for new clips on each run
+  interval_seconds: 900        # default for cameras without their own
   state_file: /var/lib/tapo-poller/state.json   # tracks last-seen clip per camera
+  cloudwatch_log_group: tapo-poller             # optional; this is the default
 
+# All cameras use the same Tapo camera account and password. The name becomes
+# the camera_id, S3 prefix and CloudWatch dimension: don't rename a camera later.
 cameras:
-  - name: c225_front
-    ip: 192.168.68.100
+  - name: c225_garage
+    ip: 192.168.68.105
     user: camera_admin
     password: yourpassword
 
-  - name: c325_garage
-    ip: 192.168.68.101
+  - name: c325_back
+    ip: 192.168.68.103
+    user: camera_admin
+    password: yourpassword
+
+  - name: c325_porch
+    ip: 192.168.68.100
     user: camera_admin
     password: yourpassword
 
@@ -26,6 +33,12 @@ cameras:
     ip: 192.168.68.101
     user: camera_admin
     password: yourpassword
+    interval_seconds: 900      # optional; overrides poller.interval_seconds
+    night_mode:                # optional; slows polling, never stops it
+      enabled: true
+      start_hour: 22           # the Pi's local hour, 0-23
+      end_hour: 6              # may wrap past midnight
+      interval_seconds: 3600   # optional; defaults to the camera's interval
     battery_powered: true      # read the battery each poll, emit BatteryPercent
     auto_pause:                # optional; needs battery_powered
       pause_below_percent: 35  # stop downloading below this
