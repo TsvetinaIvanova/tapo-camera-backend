@@ -43,7 +43,6 @@ Imported by CLAUDE.md. Update this file when a decision is made or a backlog ite
 
 - In the real config, C660 `night_mode.interval_seconds: 3200` was commented as "1h" (3600 would be exact) and `start_hour: 22` was commented as 21:00. Fix whichever side is wrong.
 - `poller/requirements.txt` pins boto3, pytapo and watchtower to what runs on the Pi; PyYAML (and aiofiles, if pytapo still needs it) aren't pinned yet: add them from the Pi's `pip freeze`.
-- Terraform backend already migrated to `use_lockfile = true` (no `dynamodb_table`). If the old `tapo-tf-state-lock` DynamoDB table still exists, delete it.
 
 ## Terraform cleanup (agreed 2026-10-06; all four steps done)
 
