@@ -27,17 +27,21 @@ resource "aws_cloudwatch_log_metric_filter" "clip_processed" {
   }
 }
 
-# Fires when fewer than 1 clip has been processed in 60 minutes.
-# Uses a single 60-minute evaluation period so the alarm fires
-# as soon as one full hour passes with no uploads.
+# Fires when no clip has been processed for 6 hours in a row, across all
+# cameras. A 1-hour window fired about 5 times a week on quiet nights
+# (replayed 2026-11-06..20: 6 hours fired only during a real outage). The
+# poller's own heartbeat and error alarms catch a broken poller sooner;
+# this one is for the pipeline after it, e.g. the processor's S3 trigger
+# silently gone, which nothing else alarms on.
 resource "aws_cloudwatch_metric_alarm" "no_uploads" {
-  alarm_name          = "tapo-no-uploads-1h"
-  alarm_description   = "No camera clips processed in the last 60 minutes — poller or pipeline may be down"
+  alarm_name          = "tapo-no-uploads-6h"
+  alarm_description   = "No camera clips processed for 6 hours: the poller's uploads or the processor's S3 trigger may be broken"
   namespace           = "Tapo/Camera"
   metric_name         = "ClipsProcessed"
   statistic           = "Sum"
-  period              = 3600 # 1 hour window
-  evaluation_periods  = 1
+  period              = 3600
+  evaluation_periods  = 6
+  datapoints_to_alarm = 6
   threshold           = 1
   comparison_operator = "LessThanThreshold"
   treat_missing_data  = "breaching" # no data = alarm, not OK
@@ -117,19 +121,42 @@ resource "aws_cloudwatch_metric_alarm" "poller_heartbeat" {
 # failures, auth failures, download failures — even if zero clips would
 # have been expected anyway. This is the case that ClipsProcessed alone
 # can't catch: the poller runs, logs errors, uploads nothing.
-resource "aws_cloudwatch_metric_alarm" "poller_errors" {
-  for_each = toset(local.tapo_camera_names)
+#
+# Only persistent errors, with a window per kind of camera (replayed against
+# 2026-11-06..20, when "any error in 30 minutes" fired 61 times for the C660):
+# - Battery cameras: an error in each of the last 4 hours. The C660 loses
+#   ~10-15% of polls to Wi-Fi drops between wakes and self-heals on the next
+#   poll. Replayed: 4 alarms (3 evenings with 4+ hours of errors, plus the
+#   11-17..19 outage as one alarm). Hourly periods because it polls only once
+#   an hour at night; shorter periods would have gaps there (missing = not
+#   breaching) and miss a night outage.
+# - Wired cameras: errors in two 30-minute periods in a row (~1 hour). They
+#   poll every 15 minutes and almost never error (1 error in 14 days, a Pi
+#   network blip). Replayed: only the 11-17..19 porch outage.
+locals {
+  poller_error_alarm = {
+    for name in local.tapo_camera_names : name => (
+      contains(local.tapo_battery_camera_names, name)
+      ? { period = 3600, periods = 4, window = "every hour for 4 hours" }
+      : { period = 1800, periods = 2, window = "for 1 hour" }
+    )
+  }
+}
 
-  alarm_name        = "tapo-poller-errors-${each.value}"
-  alarm_description = "${each.value} poller is reporting errors — connection, auth, or download failures"
+resource "aws_cloudwatch_metric_alarm" "poller_errors" {
+  for_each = local.poller_error_alarm
+
+  alarm_name        = "tapo-poller-errors-${each.key}"
+  alarm_description = "${each.key} poller has reported errors ${each.value.window}: camera unreachable, auth or download failures"
   namespace         = "Tapo/Camera"
   metric_name       = "PollCycleErrors"
   dimensions = {
-    CameraName = each.value
+    CameraName = each.key
   }
   statistic           = "Sum"
-  period              = 1800
-  evaluation_periods  = 1
+  period              = each.value.period
+  evaluation_periods  = each.value.periods
+  datapoints_to_alarm = each.value.periods
   threshold           = 1
   comparison_operator = "GreaterThanOrEqualToThreshold"
   treat_missing_data  = "notBreaching" # no errors reported = healthy, not alarming
