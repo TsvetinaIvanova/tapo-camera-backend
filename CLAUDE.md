@@ -48,7 +48,7 @@ docs/              project-notes.md (decisions, history, backlog)
 - DynamoDB: `tapo-camera-clips` (PK `camera_id`, SK `start_time`; GSI `date-start_time-index`)
 - Lambdas: `tapo-clip-processor`, `tapo-clip-query`, `tapo-clip-query-demo` (same code as query, `CAMERA_SCOPE=demo`, keyless `GET /demo/clips`), `tapo-api-authorizer`
 - Region `eu-central-1`; TF state in S3 `tapo-cameras-backend-tf-state` (S3-native locking, `use_lockfile = true`)
-- CloudWatch: namespace `Tapo/Camera`, log group `tapo-poller`, alarm `tapo-no-uploads-1h`, SNS topic `tapo-camera-alerts`
+- CloudWatch: namespace `Tapo/Camera`, log group `tapo-poller`, alarm `tapo-no-uploads-6h`, SNS topic `tapo-camera-alerts`
 - AWS profile on the Pi: `tapo-poller` (IAM user, deliberately kept as a long-lived least-privilege user)
 - GitHub OIDC role: `tapo-github-actions`, secret `AWS_ROLE_ARN`; image-pull role `tapo-github-actions-image-pull` (ci.yml's processor image job, ECR Public login only, secret `AWS_IMAGE_PULL_ROLE_ARN`); camera-override role `tapo-github-actions-camera-control` (trusts only the `camera-control` environment, secret `AWS_CAMERA_CONTROL_ROLE_ARN` there)
 - Polling overrides: SSM `/tapo/poller/override/<camera>` (runtime state written by camera-override.yml, not Terraform)
