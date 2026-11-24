@@ -133,6 +133,15 @@ resource "aws_cloudwatch_metric_alarm" "poller_heartbeat" {
 # - Wired cameras: errors in two 30-minute periods in a row (~1 hour). They
 #   poll every 15 minutes and almost never error (1 error in 14 days, a Pi
 #   network blip). Replayed: only the 11-17..19 porch outage.
+#
+# "In a row" needs FILL(errors, 0). The poller emits PollCycleErrors only
+# when a poll fails, so a clean period has no datapoint at all, and for
+# M-of-N alarms CloudWatch skips missing periods and looks further back for
+# N datapoints (treat_missing_data only applies when it can't find them).
+# Without the fill, "4 of 4" meant any 4 error hours over a longer window:
+# 7 C660 alarms in the first 4 days (2026-11-20..24), most with clean hours
+# in between. With it, a clean period is a real 0 and breaks the streak.
+# FILL of one metric is still one alarm metric, so the cost is unchanged.
 locals {
   poller_error_alarm = {
     for name in local.tapo_camera_names : name => (
@@ -148,18 +157,34 @@ resource "aws_cloudwatch_metric_alarm" "poller_errors" {
 
   alarm_name        = "tapo-poller-errors-${each.key}"
   alarm_description = "${each.key} poller has reported errors ${each.value.window}: camera unreachable, auth or download failures"
-  namespace         = "Tapo/Camera"
-  metric_name       = "PollCycleErrors"
-  dimensions = {
-    CameraName = each.key
-  }
-  statistic           = "Sum"
-  period              = each.value.period
+
   evaluation_periods  = each.value.periods
   datapoints_to_alarm = each.value.periods
   threshold           = 1
   comparison_operator = "GreaterThanOrEqualToThreshold"
-  treat_missing_data  = "notBreaching" # no errors reported = healthy, not alarming
+  # With the fill, data is only missing if the metric itself has no data in
+  # the whole query window (poller down: the heartbeat alarms' job).
+  treat_missing_data = "notBreaching"
+
+  metric_query {
+    id          = "errors_or_zero"
+    expression  = "FILL(errors, 0)"
+    label       = "PollCycleErrors, 0 when none reported"
+    return_data = true
+  }
+
+  metric_query {
+    id = "errors"
+    metric {
+      namespace   = "Tapo/Camera"
+      metric_name = "PollCycleErrors"
+      dimensions = {
+        CameraName = each.key
+      }
+      stat   = "Sum"
+      period = each.value.period
+    }
+  }
 
   alarm_actions = [aws_sns_topic.alerts.arn]
   ok_actions    = [aws_sns_topic.alerts.arn]
