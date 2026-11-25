@@ -77,6 +77,61 @@ resource "aws_iam_policy" "workload_boundary" {
           StringEquals = { "cloudwatch:namespace" = "Tapo/Camera" }
         }
       },
+      # ── Incident triage (read-only investigation + report) ──
+      {
+        # Metric reads have no resource-level permissions.
+        Sid      = "ReadMetrics"
+        Effect   = "Allow"
+        Action   = ["cloudwatch:GetMetricStatistics", "cloudwatch:GetMetricData"]
+        Resource = "*"
+      },
+      {
+        Sid      = "ReadProjectAlarms"
+        Effect   = "Allow"
+        Action   = ["cloudwatch:DescribeAlarms", "cloudwatch:DescribeAlarmHistory"]
+        Resource = "arn:aws:cloudwatch:${local.region}:${local.account_id}:alarm:tapo-*"
+      },
+      {
+        Sid    = "QueryProjectLogs"
+        Effect = "Allow"
+        Action = ["logs:StartQuery"]
+        Resource = [
+          "arn:aws:logs:${local.region}:${local.account_id}:log-group:tapo-*",
+          "arn:aws:logs:${local.region}:${local.account_id}:log-group:/aws/lambda/tapo-*",
+        ]
+      },
+      {
+        # Query IDs aren't IAM resources.
+        Sid      = "ReadLogQueryResults"
+        Effect   = "Allow"
+        Action   = ["logs:GetQueryResults", "logs:StopQuery"]
+        Resource = "*"
+      },
+      {
+        Sid      = "PublishProjectTopics"
+        Effect   = "Allow"
+        Action   = ["sns:Publish"]
+        Resource = "arn:aws:sns:${local.region}:${local.account_id}:tapo-*"
+      },
+      {
+        # Bedrock models through EU inference profiles only (requests stay in
+        # the EU). Any model: the main stack names the one each function uses.
+        Sid      = "InvokeModelsViaEuProfiles"
+        Effect   = "Allow"
+        Action   = ["bedrock:InvokeModel"]
+        Resource = "arn:aws:bedrock:${local.region}:${local.account_id}:inference-profile/eu.*"
+      },
+      {
+        # The routed call to the model in whichever EU region serves it, and
+        # only as part of an EU-profile call (no direct model calls).
+        Sid      = "InvokeFoundationModelsViaEuProfiles"
+        Effect   = "Allow"
+        Action   = ["bedrock:InvokeModel"]
+        Resource = "arn:aws:bedrock:eu-*::foundation-model/*"
+        Condition = {
+          ArnLike = { "bedrock:InferenceProfileArn" = "arn:aws:bedrock:${local.region}:${local.account_id}:inference-profile/eu.*" }
+        }
+      },
     ]
   })
 }

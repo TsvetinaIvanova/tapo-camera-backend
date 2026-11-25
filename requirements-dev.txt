@@ -1,7 +1,7 @@
 # Test dependencies (CI "Test" job and local runs). boto3 matches the
 # processor image's pin (terraform/lambda/processor/requirements.txt).
 boto3==1.44.3
-moto[dynamodb,s3,ssm]==5.2.5
+moto[cloudwatch,dynamodb,logs,s3,sns,ssm]==5.2.5
 pytest==9.2.0
 # poller.py imports yaml (tests/test_poller.py)
 PyYAML==6.0.3

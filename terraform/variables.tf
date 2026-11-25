@@ -84,3 +84,16 @@ variable "battery_low_threshold_percent" {
   type        = number
   default     = 25 # below the auto-pause threshold (35), so it fires only when pausing hasn't stopped the drain
 }
+
+variable "triage_model_id" {
+  description = "Bedrock EU inference profile ID for the incident-triage agent (any Converse model with tool use)"
+  type        = string
+  default     = "eu.amazon.nova-2-lite-v1:0"
+
+  # EU routing keeps requests in the EU (see docs/project-notes.md); the IAM
+  # policy is built from this ID, so a non-EU ID would also fail closed.
+  validation {
+    condition     = startswith(var.triage_model_id, "eu.")
+    error_message = "triage_model_id must be an EU inference profile ID (eu.<provider>.<model>)."
+  }
+}
