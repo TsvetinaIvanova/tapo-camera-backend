@@ -88,8 +88,18 @@ resource "aws_iam_policy" "workload_boundary" {
       {
         Sid      = "ReadProjectAlarms"
         Effect   = "Allow"
-        Action   = ["cloudwatch:DescribeAlarms", "cloudwatch:DescribeAlarmHistory"]
+        Action   = ["cloudwatch:DescribeAlarmHistory"]
         Resource = "arn:aws:cloudwatch:${local.region}:${local.account_id}:alarm:tapo-*"
+      },
+      {
+        # DescribeAlarms with a name prefix is authorized against alarm:*, not
+        # each alarm's ARN, so tapo-* denied it (the first triage run's list_alarms
+        # failed). Alarm configurations aren't sensitive; the triage tool still
+        # lists only tapo-* alarms.
+        Sid      = "ReadProjectAlarmsList"
+        Effect   = "Allow"
+        Action   = ["cloudwatch:DescribeAlarms"]
+        Resource = "arn:aws:cloudwatch:${local.region}:${local.account_id}:alarm:*"
       },
       {
         Sid    = "QueryProjectLogs"

@@ -334,3 +334,86 @@ def test_window_end_anchors_the_time_window_for_replays(triage, table):
     triage.WINDOW_END = past
     result, _ = triage.run_tool("recent_clips", {"camera": "c225_garage", "hours_back": 1})
     assert result.startswith("1 clips")
+
+
+def _put(metric, value, dims=(), minutes_ago=10):
+    boto3.client("cloudwatch").put_metric_data(Namespace="Tapo/Camera", MetricData=[{
+        "MetricName": metric, "Dimensions": [{"Name": n, "Value": v} for n, v in dims], "Value": value,
+        "Timestamp": datetime.now(timezone.utc) - timedelta(minutes=minutes_ago),
+    }])
+
+
+def test_repeated_camera_dimension_gives_one_series_per_camera(triage):
+    # CloudWatch itself would silently use one of the values (the first live
+    # run got the C660's series and took it for all four cameras).
+    _put("PollCycleCompleted", 4, [("CameraName", "c225_garage")])
+    _put("PollCycleCompleted", 1, [("CameraName", "c660_street")])
+
+    result, is_error = triage.run_tool("get_metric_statistics", {
+        "namespace": "Tapo/Camera", "metric_name": "PollCycleCompleted",
+        "dimensions": [{"name": "CameraName", "value": "c225_garage"}, {"name": "CameraName", "value": "c660_street"},
+                       {"name": "CameraName", "value": "c325_back"}],
+        "statistic": "Sum", "hours_back": 1, "period_minutes": 60,
+    })
+    assert not is_error
+    garage, street, back = result.split("== CameraName=")[1:]
+    assert garage.startswith("c225_garage") and "Sum=4" in garage
+    assert street.startswith("c660_street") and "Sum=1" in street
+    assert back.startswith("c325_back") and "No datapoints" in back
+
+
+def test_other_repeated_dimension_is_an_error(triage):
+    result, is_error = triage.run_tool("get_metric_statistics", {
+        "namespace": "AWS/Lambda", "metric_name": "Errors",
+        "dimensions": [{"name": "FunctionName", "value": "a"}, {"name": "FunctionName", "value": "b"}],
+        "statistic": "Sum", "hours_back": 1, "period_minutes": 60,
+    })
+    assert is_error and "only CameraName may repeat" in result
+
+
+def no_uploads_alarm():
+    return {
+        "AlarmName": "tapo-no-uploads-6h", "NewStateValue": "ALARM", "NewStateReason": "testing the triage agent",
+        "StateChangeTime": "2026-11-25T10:31:00.000+0000",
+        "Trigger": {"MetricName": "ClipsProcessed", "Namespace": "Tapo/Camera", "Statistic": "SUM", "Dimensions": [],
+                    "Period": 3600, "EvaluationPeriods": 6, "ComparisonOperator": "LessThanThreshold",
+                    "Threshold": 1.0, "TreatMissingData": "breaching"},
+    }
+
+
+def test_first_message_carries_the_alarms_own_metric(triage):
+    _put("ClipsProcessed", 7)
+    fake = FakeBedrock(response([text_block("Summary: ok")], "end_turn"))
+    triage.bedrock = fake
+
+    triage.lambda_handler({"Records": [{"Sns": {"Message": json.dumps(no_uploads_alarm())}}]}, None)
+
+    first = fake.requests[0]["messages"][0]["content"][0]["text"]
+    assert "The alarm's own metric over the last 12 h (period 60 min, 6 periods evaluated" in first
+    assert "missing data treated as breaching" in first
+    assert "Tapo/Camera ClipsProcessed (Sum):" in first and "Sum=7" in first
+
+
+def test_alarm_metric_for_a_metric_math_alarm(triage):
+    _put("PollCycleErrors", 2, [("CameraName", "c660_street")])
+    alarm = {"Trigger": {"Period": 3600, "EvaluationPeriods": 4, "Metrics": [
+        {"Id": "e1", "Expression": "FILL(errors, 0)", "ReturnData": True},
+        {"Id": "errors", "ReturnData": False, "MetricStat": {
+            "Metric": {"Namespace": "Tapo/Camera", "MetricName": "PollCycleErrors",
+                       "Dimensions": [{"name": "CameraName", "value": "c660_street"}]},
+            "Period": 3600, "Stat": "Sum"}},
+    ]}}
+
+    context = triage.alarm_metric_context(alarm)
+    assert "Alarm expression: FILL(errors, 0)" in context
+    assert "PollCycleErrors CameraName=c660_street (Sum):" in context and "Sum=2" in context
+
+
+@pytest.mark.parametrize("alarm, message", [
+    ({}, "couldn't fetch it"),  # no Trigger
+    ({"Trigger": {"Period": 300, "Metrics": []}}, "not available"),
+    ({"Trigger": {"Period": 300, "MetricName": "CPUUtilization", "Namespace": "AWS/EC2", "Statistic": "AVERAGE"}},
+     "not fetched"),
+])
+def test_alarm_metric_problems_become_a_note(triage, alarm, message):
+    assert message in triage.alarm_metric_context(alarm)
