@@ -104,8 +104,12 @@ non-consecutive "STORAGE_NOT_EXIST" (-71114) on the C660 is normal.
 - The porch socket powers exactly two devices: c325_porch and the Wi-Fi extender. c660_street is NOT plugged in \
 anywhere (battery + solar); it reaches the network only through that extender. If the porch socket loses power, c325_porch \
 goes offline (no power) and c660_street loses its network path (no extender, though it still has power): both fail together \
-with "No route to host" while the other cameras stay fine. That pattern means: check the porch socket (it happened \
-2026-11-17..19). Describe it that way: the socket powers the porch camera and the extender, and the C660 depends on the extender.
+with "No route to host" while the other cameras stay fine (it happened 2026-11-17..19). Describe it that way: the socket \
+powers the porch camera and the extender, and the C660 depends on the extender.
+  This pattern REQUIRES c660_street to be failing in the same window. The first message's "Porch socket" line decides \
+it in code: if it says RULED OUT, the porch socket and the extender have power, so never name either as a cause, not even \
+as possible or probable; the cause is the porch camera itself, its cable, or its switch/router port. One scattered C660 \
+error hours earlier is its normal Wi-Fi noise, not this pattern.
 - All cameras failing auth at once: the shared camera password changed and the poller's config is stale. "Invalid authentication \
 data" or "Incorrect device_confirm value" = wrong password. "Expecting value: line 1 column 1" usually = the camera's login lockout \
 (repeated failed logins), or a different device at that IP. Never suggest repeated login attempts: they extend the lockout.
@@ -140,7 +144,7 @@ and never suggest disabling, deleting or loosening an alarm (each one covers a f
 
 ## Report format (plain text for an e-mail, no Markdown, at most ~200 words)
 Summary: one sentence.
-Likely cause: the cause and your confidence (high, medium or low).
+Likely cause: the cause, then your confidence (high, medium or low). Always name a cause, or write "unknown"; never just a confidence.
 Evidence: 2-5 short lines with times and numbers.
 Suggested action: what to do now, or "none, likely self-heals" with when to check again.
 """
@@ -440,6 +444,49 @@ def _condition_check(trigger: dict, metrics: list[dict], expression: str | None,
             f"{breaching} breach. Condition {verdict}")
 
 
+def camera_polls(start: datetime, end: datetime) -> str:
+    """Each camera's poll cycles, errors and pauses between start and end, as
+    one fact line. The decoy eval (the porch camera failing alone) showed that
+    both models matched "porch errors" to the shared-socket pattern without
+    checking whether the C660 failed too, so code states which cameras fail."""
+    def total(metric, camera):
+        # 5-minute periods summed up, so alignment can't split or drop a datapoint.
+        return sum(_datapoints("Tapo/Camera", metric, [{"Name": "CameraName", "Value": camera}], "Sum",
+                               start, end, 300).values())
+
+    lines, errored, clean = [], [], []
+    for camera in CAMERAS:
+        cycles, errors, paused = (int(total(m, camera)) for m in ("PollCycleCompleted", "PollCycleErrors", "PollCyclePaused"))
+        polled = cycles - paused
+        if cycles == 0:
+            status = "NO poll cycles (thread down, or no cycle due in this window)"
+        elif polled <= 0:
+            status = "paused, not polled"
+        elif errors == 0:
+            status = "polling fine (no errors)"
+            clean.append(camera)
+        elif errors >= polled:
+            status = "FAILING (every poll errored)"
+        else:
+            status = "some polls errored"
+        if errors:
+            errored.append(camera)
+        lines.append(f"  {camera}: {cycles} cycles, {errors} errors, {paused} paused: {status}")
+    fact = (f"- Poll cycles per camera from {_iso(start)} to {_iso(end)} (PollCycleCompleted / PollCycleErrors / "
+            "PollCyclePaused sums; one cycle can count up to two errors):\n" + "\n".join(lines))
+    fact += (f"\n- Cameras with poll errors in this window: {', '.join(errored) or 'none'}; "
+             f"polling without errors: {', '.join(clean) or 'none'}.")
+    # Stated as a verdict, not left to the prompt rule: given only the counts,
+    # Nova 2 Lite still blamed the socket in 4 of 5 decoy runs.
+    if "c325_porch" in errored and "c660_street" in clean:
+        fact += ("\n- Porch socket: RULED OUT. c325_porch errored but c660_street polled without errors, so the Wi-Fi "
+                 "extender (same socket) had power. Look at the porch camera itself, its cable or its switch/router port.")
+    elif "c325_porch" in errored and "c660_street" in errored:
+        fact += ("\n- Porch socket: POSSIBLE. c325_porch and c660_street both errored in this window; check that their "
+                 "errors overlap in time and that the other cameras were fine.")
+    return fact
+
+
 def alarm_context(alarm: dict) -> str:
     """Facts computed in code, plus the alarm's own metric over (at least) its
     evaluation window, fetched before the model starts. A small model
@@ -484,6 +531,18 @@ def alarm_context(alarm: dict) -> str:
     except Exception as e:
         logger.warning(f"Couldn't fetch the alarm's metric: {e}", exc_info=True)
         series = f"The alarm's metric: couldn't fetch it ({type(e).__name__}: {e})."
+
+    try:
+        evaluated = _alarm_metrics(trigger)[2] * int(trigger.get("EvaluationPeriods", 1))
+    except Exception:
+        evaluated = 0
+    # The alarm's evaluation window, 2 to 24 hours (the C660 polls hourly at night).
+    end = window_end()
+    try:
+        facts.append(camera_polls(end - timedelta(seconds=min(max(evaluated, 2 * 3600), 24 * 3600)), end))
+    except Exception as e:
+        logger.warning(f"Couldn't fetch the per-camera poll counts: {e}", exc_info=True)
+        facts.append(f"- Per-camera poll counts: couldn't fetch them ({type(e).__name__}: {e}).")
     if len(series) > MAX_TOOL_RESULT_CHARS:
         series = series[:MAX_TOOL_RESULT_CHARS] + "\n... (truncated)"
     return "Checked by code (reliable; never contradict these):\n" + "\n".join(facts) + "\n\n" + series

@@ -528,3 +528,57 @@ def test_unparseable_override_is_passed_through(triage):
     boto3.client("ssm").put_parameter(Name=OVERRIDE_PREFIX + "c660_street", Type="String", Value="pause please")
     result, _ = triage.run_tool("get_camera_override", {"camera": "c660_street"})
     assert "pause please" in result and "couldn't parse" in result
+
+
+def test_poll_counts_per_camera_separate_the_porch_camera_from_the_socket(triage, monkeypatch):
+    # The decoy eval: the porch camera fails alone while the C660 (on the
+    # porch socket's extender) polls fine, which rules out the socket.
+    monkeypatch.setattr(triage, "CAMERAS", ["c225_garage", "c325_back", "c325_porch", "c660_street"])
+    starts = _aligned_window(triage, 1800)(2)
+    for ts in starts:
+        for cam in ("c225_garage", "c325_back", "c325_porch", "c660_street"):
+            _put_at("PollCycleCompleted", 2, ts, [("CameraName", cam)])
+        _put_at("PollCycleErrors", 2, ts, [("CameraName", "c325_porch")])
+    _put_at("PollCycleErrors", 1, starts[1], [("CameraName", "c225_garage")])
+
+    context = triage.alarm_context(math_errors_alarm())
+    assert "Poll cycles per camera from" in context
+    assert "c325_porch: 4 cycles, 4 errors, 0 paused: FAILING (every poll errored)" in context
+    assert "c660_street: 4 cycles, 0 errors, 0 paused: polling fine (no errors)" in context
+    assert "c225_garage: 4 cycles, 1 errors, 0 paused: some polls errored" in context
+    assert "Cameras with poll errors in this window: c225_garage, c325_porch; polling without errors: c325_back, c660_street." in context
+    assert "Porch socket: RULED OUT." in context
+
+
+def test_poll_counts_keep_the_porch_socket_open_when_both_fail(triage, monkeypatch):
+    # The 2026-11-17 outage: the porch camera and the C660 fail together.
+    monkeypatch.setattr(triage, "CAMERAS", ["c225_garage", "c325_back", "c325_porch", "c660_street"])
+    starts = _aligned_window(triage, 1800)(2)
+    for ts in starts:
+        for cam in ("c225_garage", "c325_back", "c325_porch", "c660_street"):
+            _put_at("PollCycleCompleted", 2, ts, [("CameraName", cam)])
+        for cam in ("c325_porch", "c660_street"):
+            _put_at("PollCycleErrors", 2, ts, [("CameraName", cam)])
+
+    context = triage.alarm_context(math_errors_alarm())
+    assert "Porch socket: POSSIBLE." in context
+    assert "RULED OUT" not in context
+
+
+def test_poll_counts_flag_paused_and_silent_cameras(triage):
+    starts = _aligned_window(triage, 3600)(2)
+    _put_at("PollCycleCompleted", 2, starts[0], [("CameraName", "c660_street")])
+    _put_at("PollCyclePaused", 2, starts[0], [("CameraName", "c660_street")])
+
+    context = triage.alarm_context(no_uploads_alarm())
+    assert "c660_street: 2 cycles, 0 errors, 2 paused: paused, not polled" in context
+    assert "c225_garage: 0 cycles, 0 errors, 0 paused: NO poll cycles" in context
+    assert "Porch socket:" not in context
+
+
+def test_poll_count_failure_becomes_a_note(triage, monkeypatch):
+    def broken(*args, **kwargs):
+        raise RuntimeError("throttled")
+    monkeypatch.setattr(triage, "_datapoints", broken)
+    context = triage.alarm_context(no_uploads_alarm())
+    assert "Per-camera poll counts: couldn't fetch them (RuntimeError: throttled)." in context
