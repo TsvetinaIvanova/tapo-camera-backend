@@ -291,7 +291,7 @@ def test_camera_override(triage):
     boto3.client("ssm").put_parameter(Name=OVERRIDE_PREFIX + "c660_street", Type="String",
                                       Value='{"mode": "pause", "until": "2026-11-25T10:00:00+00:00"}')
     result, _ = triage.run_tool("get_camera_override", {"camera": "c660_street"})
-    assert '"mode": "pause"' in result
+    assert "mode 'pause'" in result
 
 
 def test_recent_clips_newest_first(triage, table):
@@ -404,16 +404,181 @@ def test_alarm_metric_for_a_metric_math_alarm(triage):
             "Period": 3600, "Stat": "Sum"}},
     ]}}
 
-    context = triage.alarm_metric_context(alarm)
+    context = triage.alarm_context(alarm)
     assert "Alarm expression: FILL(errors, 0)" in context
     assert "PollCycleErrors CameraName=c660_street (Sum):" in context and "Sum=2" in context
 
 
+def test_metric_math_alarm_without_a_top_level_period(triage):
+    # describe-alarms shows Period only inside MetricStat for these alarms.
+    _put("PollCycleErrors", 3, [("CameraName", "c325_porch")])
+    alarm = {"Trigger": {"EvaluationPeriods": 2, "Metrics": [
+        {"Id": "errors", "ReturnData": False, "MetricStat": {
+            "Metric": {"Namespace": "Tapo/Camera", "MetricName": "PollCycleErrors",
+                       "Dimensions": [{"name": "CameraName", "value": "c325_porch"}]},
+            "Period": 1800, "Stat": "Sum"}},
+        {"Id": "errors_or_zero", "Expression": "FILL(errors, 0)", "ReturnData": True},
+    ]}}
+
+    context = triage.alarm_context(alarm)
+    assert "over the last 3 h (period 30 min, 2 periods evaluated" in context and "Sum=3" in context
+
+
 @pytest.mark.parametrize("alarm, message", [
     ({}, "couldn't fetch it"),  # no Trigger
-    ({"Trigger": {"Period": 300, "Metrics": []}}, "not available"),
+    ({"Trigger": {"Period": 300, "Metrics": []}}, "no metric in the notification"),
     ({"Trigger": {"Period": 300, "MetricName": "CPUUtilization", "Namespace": "AWS/EC2", "Statistic": "AVERAGE"}},
      "not fetched"),
 ])
 def test_alarm_metric_problems_become_a_note(triage, alarm, message):
-    assert message in triage.alarm_metric_context(alarm)
+    assert message in triage.alarm_context(alarm)
+
+
+# ── Facts checked by code ───────────────────────────────────
+
+def _aligned_window(triage, period):
+    """Pin WINDOW_END mid-period and return the start of each of the last periods (oldest first)."""
+    now = int(time.time()) // period * period
+    triage.WINDOW_END = datetime.fromtimestamp(now + period // 3, timezone.utc)
+    return lambda n: [datetime.fromtimestamp(now - period * (n - i), timezone.utc) for i in range(n)]
+
+
+def _put_at(metric, value, ts, dims=()):
+    boto3.client("cloudwatch").put_metric_data(Namespace="Tapo/Camera", MetricData=[{
+        "MetricName": metric, "Dimensions": [{"Name": n, "Value": v} for n, v in dims], "Value": value,
+        "Timestamp": ts + timedelta(minutes=5),
+    }])
+
+
+def test_free_text_reason_is_flagged_as_set_by_hand(triage):
+    assert "NOT set by CloudWatch's metric evaluation" in triage.alarm_context(no_uploads_alarm())
+    alarm = dict(no_uploads_alarm(), NewStateReason="Threshold Crossed: 6 datapoints were less than the threshold (1.0).")
+    assert "State set by CloudWatch's own evaluation" in triage.alarm_context(alarm)
+
+
+def test_no_uploads_condition_not_met_when_clips_were_processed(triage):
+    # The second live run claimed ClipsProcessed was 0 next to hourly 8s and 12s.
+    starts = _aligned_window(triage, 3600)(6)
+    for ts, value in zip(starts, [11, 4, 4, 12, 8, 8]):
+        _put_at("ClipsProcessed", value, ts)
+
+    context = triage.alarm_context(no_uploads_alarm())
+    assert ": 11, 4, 4, 12, 8, 8." in context
+    assert "needs 6 of 6 periods < 1 (missing data: breaching); 0 breach. Condition NOT MET" in context
+
+
+def test_no_uploads_condition_met_when_nothing_was_reported(triage):
+    _aligned_window(triage, 3600)
+    context = triage.alarm_context(no_uploads_alarm())
+    assert "missing, missing, missing, missing, missing, missing" in context
+    assert "6 breach. Condition MET." in context
+
+
+def test_treat_missing_data_in_the_verbose_sns_format(triage):
+    _aligned_window(triage, 3600)
+    alarm = no_uploads_alarm()
+    alarm["Trigger"]["TreatMissingData"] = "- TreatMissingData:                    Breaching"
+    assert "6 breach. Condition MET." in triage.alarm_context(alarm)
+
+
+def math_errors_alarm():
+    return {"NewStateReason": "Threshold Crossed: 2 datapoints were greater than or equal to the threshold (1.0).",
+            "Trigger": {"EvaluationPeriods": 2, "ComparisonOperator": "GreaterThanOrEqualToThreshold", "Threshold": 1.0,
+                        "TreatMissingData": "notBreaching", "Metrics": [
+                            {"Id": "errors", "ReturnData": False, "MetricStat": {
+                                "Metric": {"Namespace": "Tapo/Camera", "MetricName": "PollCycleErrors",
+                                           "Dimensions": [{"name": "CameraName", "value": "c325_porch"}]},
+                                "Period": 1800, "Stat": "Sum"}},
+                            {"Id": "errors_or_zero", "Expression": "FILL(errors, 0)", "ReturnData": True}]}}
+
+
+@pytest.mark.parametrize("values, expected", [
+    ([1, 2], "2 breach. Condition MET."),
+    ([None, 2], "0, 2. The alarm needs 2 of 2 periods >= 1 (missing data: notBreaching); 1 breach. Condition NOT MET"),
+])
+def test_fill_metric_math_condition(triage, values, expected):
+    starts = _aligned_window(triage, 1800)(2)
+    for ts, value in zip(starts, values):
+        if value is not None:
+            _put_at("PollCycleErrors", value, ts, [("CameraName", "c325_porch")])
+
+    assert expected in triage.alarm_context(math_errors_alarm())
+
+
+def test_unknown_alarm_shapes_get_data_but_no_verdict(triage):
+    alarm = math_errors_alarm()
+    alarm["Trigger"]["Metrics"][1]["Expression"] = "errors * 2"
+    context = triage.alarm_context(alarm)
+    assert "Condition" not in context and "PollCycleErrors CameraName=c325_porch (Sum):" in context
+
+
+@pytest.mark.parametrize("until, expected", [
+    ("2026-11-06T10:16:51+00:00", "EXPIRED 19.1 days ago, NOT in effect"),
+    ("2026-11-25T17:00:00+00:00", "ACTIVE for another 5.0 h"),
+])
+def test_camera_override_is_interpreted(triage, until, expected):
+    triage.WINDOW_END = datetime(2026, 11, 25, 12, 0, tzinfo=timezone.utc)
+    boto3.client("ssm").put_parameter(Name=OVERRIDE_PREFIX + "c660_street", Type="String",
+                                      Value=json.dumps({"mode": "pause", "until": until, "set_by": "someone"}))
+    result, _ = triage.run_tool("get_camera_override", {"camera": "c660_street"})
+    assert "mode 'pause'" in result and expected in result
+
+
+def test_unparseable_override_is_passed_through(triage):
+    boto3.client("ssm").put_parameter(Name=OVERRIDE_PREFIX + "c660_street", Type="String", Value="pause please")
+    result, _ = triage.run_tool("get_camera_override", {"camera": "c660_street"})
+    assert "pause please" in result and "couldn't parse" in result
+
+
+def test_poll_counts_per_camera_separate_the_porch_camera_from_the_socket(triage, monkeypatch):
+    # The decoy eval: the porch camera fails alone while the C660 (on the
+    # porch socket's extender) polls fine, which rules out the socket.
+    monkeypatch.setattr(triage, "CAMERAS", ["c225_garage", "c325_back", "c325_porch", "c660_street"])
+    starts = _aligned_window(triage, 1800)(2)
+    for ts in starts:
+        for cam in ("c225_garage", "c325_back", "c325_porch", "c660_street"):
+            _put_at("PollCycleCompleted", 2, ts, [("CameraName", cam)])
+        _put_at("PollCycleErrors", 2, ts, [("CameraName", "c325_porch")])
+    _put_at("PollCycleErrors", 1, starts[1], [("CameraName", "c225_garage")])
+
+    context = triage.alarm_context(math_errors_alarm())
+    assert "Poll cycles per camera from" in context
+    assert "c325_porch: 4 cycles, 4 errors, 0 paused: FAILING (every poll errored)" in context
+    assert "c660_street: 4 cycles, 0 errors, 0 paused: polling fine (no errors)" in context
+    assert "c225_garage: 4 cycles, 1 errors, 0 paused: some polls errored" in context
+    assert "Cameras with poll errors in this window: c225_garage, c325_porch; polling without errors: c325_back, c660_street." in context
+    assert "Porch socket: RULED OUT." in context
+
+
+def test_poll_counts_keep_the_porch_socket_open_when_both_fail(triage, monkeypatch):
+    # The 2026-11-17 outage: the porch camera and the C660 fail together.
+    monkeypatch.setattr(triage, "CAMERAS", ["c225_garage", "c325_back", "c325_porch", "c660_street"])
+    starts = _aligned_window(triage, 1800)(2)
+    for ts in starts:
+        for cam in ("c225_garage", "c325_back", "c325_porch", "c660_street"):
+            _put_at("PollCycleCompleted", 2, ts, [("CameraName", cam)])
+        for cam in ("c325_porch", "c660_street"):
+            _put_at("PollCycleErrors", 2, ts, [("CameraName", cam)])
+
+    context = triage.alarm_context(math_errors_alarm())
+    assert "Porch socket: POSSIBLE." in context
+    assert "RULED OUT" not in context
+
+
+def test_poll_counts_flag_paused_and_silent_cameras(triage):
+    starts = _aligned_window(triage, 3600)(2)
+    _put_at("PollCycleCompleted", 2, starts[0], [("CameraName", "c660_street")])
+    _put_at("PollCyclePaused", 2, starts[0], [("CameraName", "c660_street")])
+
+    context = triage.alarm_context(no_uploads_alarm())
+    assert "c660_street: 2 cycles, 0 errors, 2 paused: paused, not polled" in context
+    assert "c225_garage: 0 cycles, 0 errors, 0 paused: NO poll cycles" in context
+    assert "Porch socket:" not in context
+
+
+def test_poll_count_failure_becomes_a_note(triage, monkeypatch):
+    def broken(*args, **kwargs):
+        raise RuntimeError("throttled")
+    monkeypatch.setattr(triage, "_datapoints", broken)
+    context = triage.alarm_context(no_uploads_alarm())
+    assert "Per-camera poll counts: couldn't fetch them (RuntimeError: throttled)." in context
