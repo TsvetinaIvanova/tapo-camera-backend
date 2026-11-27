@@ -122,32 +122,54 @@ resource "aws_cloudwatch_metric_alarm" "poller_heartbeat" {
 # have been expected anyway. This is the case that ClipsProcessed alone
 # can't catch: the poller runs, logs errors, uploads nothing.
 #
-# Only persistent errors, with a window per kind of camera (replayed against
-# 2026-11-06..20, when "any error in 30 minutes" fired 61 times for the C660):
-# - Battery cameras: an error in each of the last 4 hours. The C660 loses
-#   ~10-15% of polls to Wi-Fi drops between wakes and self-heals on the next
-#   poll. Replayed: 4 alarms (3 evenings with 4+ hours of errors, plus the
-#   11-17..19 outage as one alarm). Hourly periods because it polls only once
-#   an hour at night; shorter periods would have gaps there (missing = not
-#   breaching) and miss a night outage.
-# - Wired cameras: errors in two 30-minute periods in a row (~1 hour). They
-#   poll every 15 minutes and almost never error (1 error in 14 days, a Pi
-#   network blip). Replayed: only the 11-17..19 porch outage.
+# Only persistent errors, with a window per kind of camera.
+#
+# CloudWatch evaluates an alarm's periods as rolling windows ending at the
+# minute it evaluates (once a minute), not as clock-aligned hours: the
+# datapoints in each transition's stateReason are stamped :41, :42, :43...
+# So a window only reliably contains a poll if it's clearly longer than the
+# poll interval. Every replay below is minute by minute over 2026-11-13..27.
+#
+# - Battery cameras: at least 75% of polls failed over the last 4 hours, one
+#   rolling window (FILL(errors, 0) / completed). The C660 polls every 15
+#   minutes by day and hourly at night, and loses ~10-15% of polls to Wi-Fi
+#   drops that self-heal. The earlier "an error in each of 4 hourly periods"
+#   flapped through every night outage: a failed poll takes ~23 s, so polls
+#   are 3623 s apart at night, and once an hour one window fell between two
+#   polls, read 0 and set the alarm OK for a minute or more (2026-11-26..27:
+#   about one OK/ALARM pair an hour). Replayed: 36 ALARM transitions for the
+#   old alarm; 4 for this one (the 11-17..19 outage and the 11-26 outage as
+#   one alarm each, plus a ~2 h night Wi-Fi outage on 11-13 that flapped
+#   once). 90% instead of 75% flaps (20): a cycle's PollCycleCompleted lands
+#   ~20 s before its error, so a window's edge often holds a cycle whose
+#   error hasn't arrived yet. Shorter windows (2-3 h) give 10-22.
+#   Two metrics in the expression: one more billed alarm metric (~$0.10 a
+#   month), which buys an alarm that stays on through an outage.
+#   Accepted gap: while auto-paused, an unreachable camera fails only one
+#   battery probe per probe interval and the skipped cycles count as
+#   completed, so this alarm stays quiet until the pause ends.
+# - Wired cameras: errors in two 30-minute windows in a row (~1 hour). They
+#   poll every 15 minutes, so each window holds about two polls and can't
+#   fall in a gap. They almost never error; replayed: only the 11-17..19
+#   porch outage (it flapped a few times while coming back on 11-19).
 #
 # "In a row" needs FILL(errors, 0). The poller emits PollCycleErrors only
-# when a poll fails, so a clean period has no datapoint at all, and for
+# when a poll fails, so a clean window has no datapoint at all, and for
 # M-of-N alarms CloudWatch skips missing periods and looks further back for
 # N datapoints (treat_missing_data only applies when it can't find them).
-# Without the fill, "4 of 4" meant any 4 error hours over a longer window:
-# 7 C660 alarms in the first 4 days (2026-11-20..24), most with clean hours
-# in between. With it, a clean period is a real 0 and breaks the streak.
-# FILL of one metric is still one alarm metric, so the cost is unchanged.
+# FILL of one metric is still one alarm metric.
 locals {
   poller_error_alarm = {
     for name in local.tapo_camera_names : name => (
       contains(local.tapo_battery_camera_names, name)
-      ? { period = 3600, periods = 4, window = "every hour for 4 hours" }
-      : { period = 1800, periods = 2, window = "for 1 hour" }
+      ? {
+        period = 14400, periods = 1, threshold = 0.75, ratio = true,
+        window = "on at least 75% of polls over the last 4 hours"
+      }
+      : {
+        period = 1800, periods = 2, threshold = 1, ratio = false,
+        window = "in two 30-minute windows in a row"
+      }
     )
   }
 }
@@ -160,16 +182,17 @@ resource "aws_cloudwatch_metric_alarm" "poller_errors" {
 
   evaluation_periods  = each.value.periods
   datapoints_to_alarm = each.value.periods
-  threshold           = 1
+  threshold           = each.value.threshold
   comparison_operator = "GreaterThanOrEqualToThreshold"
   # With the fill, data is only missing if the metric itself has no data in
-  # the whole query window (poller down: the heartbeat alarms' job).
+  # the whole query window, or (ratio) no poll cycle ran in the window:
+  # poller down, the heartbeat alarms' job.
   treat_missing_data = "notBreaching"
 
   metric_query {
-    id          = "errors_or_zero"
-    expression  = "FILL(errors, 0)"
-    label       = "PollCycleErrors, 0 when none reported"
+    id          = "result"
+    expression  = each.value.ratio ? "FILL(errors, 0) / completed" : "FILL(errors, 0)"
+    label       = each.value.ratio ? "Share of poll cycles that failed" : "PollCycleErrors, 0 when none reported"
     return_data = true
   }
 
@@ -183,6 +206,22 @@ resource "aws_cloudwatch_metric_alarm" "poller_errors" {
       }
       stat   = "Sum"
       period = each.value.period
+    }
+  }
+
+  dynamic "metric_query" {
+    for_each = each.value.ratio ? [1] : []
+    content {
+      id = "completed"
+      metric {
+        namespace   = "Tapo/Camera"
+        metric_name = "PollCycleCompleted"
+        dimensions = {
+          CameraName = each.key
+        }
+        stat   = "Sum"
+        period = each.value.period
+      }
     }
   }
 
