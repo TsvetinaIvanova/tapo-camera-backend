@@ -437,10 +437,12 @@ def test_alarm_metric_problems_become_a_note(triage, alarm, message):
 # ── Facts checked by code ───────────────────────────────────
 
 def _aligned_window(triage, period):
-    """Pin WINDOW_END mid-period and return the start of each of the last periods (oldest first)."""
-    now = int(time.time()) // period * period
-    triage.WINDOW_END = datetime.fromtimestamp(now + period // 3, timezone.utc)
-    return lambda n: [datetime.fromtimestamp(now - period * (n - i), timezone.utc) for i in range(n)]
+    """Pin WINDOW_END to a time that is NOT on a period boundary (CloudWatch's
+    windows roll with the evaluation minute) and return the start of each of
+    the last windows (oldest first)."""
+    end = (int(time.time()) // period * period) - period // 3 // 60 * 60
+    triage.WINDOW_END = datetime.fromtimestamp(end + 25, timezone.utc)  # seconds are dropped
+    return lambda n: [datetime.fromtimestamp(end - period * (n - i), timezone.utc) for i in range(n)]
 
 
 def _put_at(metric, value, ts, dims=()):
@@ -464,7 +466,7 @@ def test_no_uploads_condition_not_met_when_clips_were_processed(triage):
 
     context = triage.alarm_context(no_uploads_alarm())
     assert ": 11, 4, 4, 12, 8, 8." in context
-    assert "needs 6 of 6 periods < 1 (missing data: breaching); 0 breach. Condition NOT MET" in context
+    assert "needs 6 of 6 windows < 1 (missing data: breaching); 0 breach. Condition NOT MET" in context
 
 
 def test_no_uploads_condition_met_when_nothing_was_reported(triage):
@@ -494,7 +496,7 @@ def math_errors_alarm():
 
 @pytest.mark.parametrize("values, expected", [
     ([1, 2], "2 breach. Condition MET."),
-    ([None, 2], "0, 2. The alarm needs 2 of 2 periods >= 1 (missing data: notBreaching); 1 breach. Condition NOT MET"),
+    ([None, 2], "0, 2. The alarm needs 2 of 2 windows >= 1 (missing data: notBreaching); 1 breach. Condition NOT MET"),
 ])
 def test_fill_metric_math_condition(triage, values, expected):
     starts = _aligned_window(triage, 1800)(2)
@@ -503,6 +505,54 @@ def test_fill_metric_math_condition(triage, values, expected):
             _put_at("PollCycleErrors", value, ts, [("CameraName", "c325_porch")])
 
     assert expected in triage.alarm_context(math_errors_alarm())
+
+
+def ratio_errors_alarm():
+    """The battery cameras' alarm: share of failed polls over one 4-hour window."""
+    def stat(id_, metric):
+        return {"Id": id_, "ReturnData": False, "MetricStat": {
+            "Metric": {"Namespace": "Tapo/Camera", "MetricName": metric,
+                       "Dimensions": [{"name": "CameraName", "value": "c660_street"}]},
+            "Period": 14400, "Stat": "Sum"}}
+    return {"NewStateReason": "Threshold Crossed: 1 datapoint was greater than or equal to the threshold (0.75).",
+            "Trigger": {"EvaluationPeriods": 1, "ComparisonOperator": "GreaterThanOrEqualToThreshold", "Threshold": 0.75,
+                        "TreatMissingData": "notBreaching", "Metrics": [
+                            {"Id": "result", "Expression": "FILL(errors, 0) / completed", "ReturnData": True},
+                            stat("errors", "PollCycleErrors"), stat("completed", "PollCycleCompleted")]}}
+
+
+@pytest.mark.parametrize("errors, completed, expected", [
+    ([1, 1, 1, 1], [1, 1, 1, 1], ": 1. The alarm needs 1 of 1 windows >= 0.75 (missing data: notBreaching); 1 breach. Condition MET."),
+    ([1, 1], [1, 1, 1, 1], ": 0.5. The alarm needs 1 of 1 windows >= 0.75"),
+    ([], [1, 1, 1, 1], ": 0. The alarm needs"),  # FILL: no errors at all is a real 0
+    ([], [], ": missing. The alarm needs"),  # no poll cycles: no value, not a division by zero
+])
+def test_failed_poll_share_condition(triage, errors, completed, expected):
+    start = _aligned_window(triage, 14400)(1)[0]
+    cam = [("CameraName", "c660_street")]
+    # One poll an hour (the C660 at night), spread over the rolling window.
+    for i, v in enumerate(completed):
+        _put_at("PollCycleCompleted", v, start + timedelta(hours=i), cam)
+    for i, v in enumerate(errors):
+        _put_at("PollCycleErrors", v, start + timedelta(hours=i, seconds=20), cam)
+
+    context = triage.alarm_context(ratio_errors_alarm())
+    assert "FILL(errors, 0) / completed (Tapo/Camera PollCycleErrors CameraName=c660_street Sum / " in context
+    assert expected in context
+
+
+def test_rolling_windows_ignore_clock_hours(triage):
+    # Two errors in the last rolling 30 minutes but in different clock
+    # half-hours: one window, value 2 (the alarm datapoints of 2026-11-27
+    # were stamped :41, :42, :43, not :00).
+    end = datetime.fromtimestamp(int(time.time()) // 1800 * 1800 + 600, timezone.utc)  # hh:10 or hh:40
+    triage.WINDOW_END = end
+    for minutes_back in (25, 5):  # either side of the half hour
+        boto3.client("cloudwatch").put_metric_data(Namespace="Tapo/Camera", MetricData=[{
+            "MetricName": "PollCycleErrors", "Dimensions": [{"Name": "CameraName", "Value": "c325_porch"}],
+            "Value": 1, "Timestamp": end - timedelta(minutes=minutes_back)}])
+    assert "rolling 30-minute windows" in triage.alarm_context(math_errors_alarm())
+    assert ": 0, 2. The alarm needs 2 of 2 windows" in triage.alarm_context(math_errors_alarm())
 
 
 def test_unknown_alarm_shapes_get_data_but_no_verdict(triage):
@@ -563,6 +613,30 @@ def test_poll_counts_keep_the_porch_socket_open_when_both_fail(triage, monkeypat
     context = triage.alarm_context(math_errors_alarm())
     assert "Porch socket: POSSIBLE." in context
     assert "RULED OUT" not in context
+
+
+def test_c660_failing_alone_clears_the_socket_and_dates_the_last_contact(triage, monkeypatch):
+    # 2026-11-26: the C660 failed alone, the porch camera (same socket as the
+    # extender) polled fine, and a report still blamed the extender's power.
+    monkeypatch.setattr(triage, "CAMERAS", ["c225_garage", "c325_back", "c325_porch", "c660_street"])
+    starts = _aligned_window(triage, 14400)(1)
+    for cam in ("c225_garage", "c325_back", "c325_porch", "c660_street"):
+        _put_at("PollCycleCompleted", 4, starts[0], [("CameraName", cam)])
+    _put_at("PollCycleErrors", 4, starts[0], [("CameraName", "c660_street")])
+    last = triage.WINDOW_END - timedelta(hours=14, minutes=30)
+    boto3.client("cloudwatch").put_metric_data(Namespace="Tapo/Camera", MetricData=[{
+        "MetricName": "BatteryPercent", "Dimensions": [{"Name": "CameraName", "Value": "c660_street"}],
+        "Value": 53, "Timestamp": last}])
+
+    context = triage.alarm_context(ratio_errors_alarm())
+    assert "Porch socket: HAS POWER." in context and "the extender itself failed" in context
+    assert "RULED OUT" not in context and "POSSIBLE" not in context
+    assert "c660_street battery: last reading 53% at" in context and "14.5 h before" in context
+
+
+def test_no_battery_reading_is_stated(triage):
+    _aligned_window(triage, 3600)
+    assert "c660_street battery: no reading in the last 3 days" in triage.alarm_context(no_uploads_alarm())
 
 
 def test_poll_counts_flag_paused_and_silent_cameras(triage):

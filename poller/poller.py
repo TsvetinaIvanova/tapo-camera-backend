@@ -543,6 +543,11 @@ async def poll_camera(
         logger.error(f"  ❌  [{name}] Connection failed: {e}")
         if cloudwatch_client:
             emit_metric(cloudwatch_client, "PollCycleErrors", name)
+        # A failed battery probe still counts as one, or an auto-paused camera
+        # that can't be reached would be woken every cycle instead of every
+        # probe_interval_seconds (the opposite of what pausing is for).
+        if camera.get("auto_pause") and state.get(name, {}).get("auto_paused"):
+            state[name]["last_battery_check"] = int(time.time())
         return state
 
     if camera.get("battery_powered"):

@@ -110,6 +110,12 @@ powers the porch camera and the extender, and the C660 depends on the extender.
 it in code: if it says RULED OUT, the porch socket and the extender have power, so never name either as a cause, not even \
 as possible or probable; the cause is the porch camera itself, its cable, or its switch/router port. One scattered C660 \
 error hours earlier is its normal Wi-Fi noise, not this pattern.
+- c660_street failing alone (the "Porch socket" line says HAS POWER): the socket is not the cause, so never say the extender \
+lost power. The candidates are the extender itself failing (it can hang while powered), the C660's Wi-Fi link, or the C660 \
+itself (battery: cold below ~5 °C cuts capacity, and a cold Li-ion can shut down while still reporting a fair percentage). \
+Name them as possibilities unless the evidence separates them: the "c660_street battery" line gives the last reading and \
+when the poller last reached the camera; occasional successful polls between failures point at a weak Wi-Fi link rather \
+than a dead extender or an empty battery. Suggest checking the extender's status light and the camera in the Tapo app.
 - All cameras failing auth at once: the shared camera password changed and the poller's config is stale. "Invalid authentication \
 data" or "Incorrect device_confirm value" = wrong password. "Expecting value: line 1 column 1" usually = the camera's login lockout \
 (repeated failed logins), or a different device at that IP. Never suggest repeated login attempts: they extend the lockout.
@@ -357,7 +363,11 @@ COMPARISONS = {
     "LessThanThreshold": ("<", lambda v, t: v < t),
     "LessThanOrEqualToThreshold": ("<=", lambda v, t: v <= t),
 }
-FILL_EXPRESSION = re.compile(r"^\s*FILL\(\s*(\w+)\s*,\s*(-?\d+(?:\.\d+)?)\s*\)\s*$")
+# The expressions the condition check understands: "x", "FILL(x, n)", and
+# either of those divided by "y" (the battery cameras' failed-poll share).
+ALARM_EXPRESSION = re.compile(
+    r"^\s*(?:FILL\(\s*(?P<filled>\w+)\s*,\s*(?P<fill>-?\d+(?:\.\d+)?)\s*\)|(?P<bare>\w+))"
+    r"\s*(?:/\s*(?P<denominator>\w+)\s*)?$")
 
 
 def _alarm_metrics(trigger: dict) -> tuple[list[dict], str | None, int]:
@@ -389,20 +399,53 @@ def _alarm_metrics(trigger: dict) -> tuple[list[dict], str | None, int]:
     return raw, expression, period
 
 
+def _window_values(m: dict, start: datetime, period: int, periods: int) -> list[float | None]:
+    """The metric's value in each of `periods` windows of `period` seconds
+    from `start`, oldest first (None: no datapoint). Sums are built from
+    1-minute datapoints, because the windows are rolling, not aligned to the
+    period, and CloudWatch's own buckets wouldn't line up with them."""
+    end = start + timedelta(seconds=period * periods)
+    span = period * periods
+    step = 60 if m["stat"] == "Sum" and span <= 1440 * 60 else (300 if m["stat"] == "Sum" and span <= 1440 * 300 else period)
+    points = _datapoints(m["namespace"], m["metric"], m["dims"], m["stat"], start, end, step)
+    # Bucket by window rather than trusting exact timestamps (moto, in the
+    # tests, doesn't align them the way CloudWatch does).
+    values: list[float | None] = [None] * periods
+    for ts, v in points.items():
+        index = int((ts - start).total_seconds()) // period
+        if 0 <= index < periods:
+            values[index] = (values[index] or 0) + v if m["stat"] == "Sum" else v
+    return values
+
+
 def _condition_check(trigger: dict, metrics: list[dict], expression: str | None, period: int) -> str:
-    """Re-evaluate the alarm's condition over its last complete evaluation
-    periods, the way CloudWatch would. Returns one line, or "" when the
-    alarm's shape isn't one this can evaluate (then the model just gets the
-    data, as before)."""
+    """Re-evaluate the alarm's condition the way CloudWatch would. Returns
+    one line, or "" when the alarm's shape isn't one this can evaluate (then
+    the model just gets the data, as before).
+
+    CloudWatch evaluates rolling windows that end at the minute it evaluates,
+    not periods aligned to the clock (a transition's stateReason stamps its
+    datapoints :41, :42, ...), so these windows end at WINDOW_END's minute."""
     comparison = COMPARISONS.get(trigger.get("ComparisonOperator"))
-    if comparison is None or len(metrics) != 1 or not metrics[0]["supported"] or trigger.get("Threshold") is None:
+    if comparison is None or not metrics or not all(m["supported"] for m in metrics) or trigger.get("Threshold") is None:
         return ""
-    fill = None
-    if expression is not None:
-        match = FILL_EXPRESSION.match(expression)
-        if not match or match.group(1) != metrics[0]["id"]:
+    by_id = {m["id"]: m for m in metrics}
+    fill, denominator = None, None
+    if expression is None:
+        if len(metrics) != 1:
             return ""
-        fill = float(match.group(2))
+        numerator = metrics[0]
+    else:
+        match = ALARM_EXPRESSION.match(expression)
+        if not match:
+            return ""
+        ids = [match.group("filled") or match.group("bare")] + ([match.group("denominator")] if match.group("denominator") else [])
+        if set(ids) != set(by_id) or len(ids) != len(by_id):
+            return ""
+        numerator = by_id[ids[0]]
+        denominator = by_id[ids[1]] if len(ids) > 1 else None
+        if match.group("fill") is not None:
+            fill = float(match.group("fill"))
     op, breaches = comparison
     threshold = float(trigger["Threshold"])
     periods = int(trigger.get("EvaluationPeriods", 1))
@@ -411,36 +454,33 @@ def _condition_check(trigger: dict, metrics: list[dict], expression: str | None,
     words = str(trigger.get("TreatMissingData") or "missing").split()
     missing_as = words[-1] if words else "missing"
 
-    # The last `periods` complete periods, aligned to the period.
-    end_ts = int(window_end().timestamp()) // period * period
-    end = datetime.fromtimestamp(end_ts, timezone.utc)
+    end = window_end().replace(second=0, microsecond=0)
     start = end - timedelta(seconds=period * periods)
-    m = metrics[0]
-    points = _datapoints(m["namespace"], m["metric"], m["dims"], m["stat"], start, end, period)
+    tops = [v if v is not None else fill for v in _window_values(numerator, start, period, periods)]
+    if denominator is not None:
+        bottoms = _window_values(denominator, start, period, periods)
+        # Metric math gives no value where the divisor is missing or 0.
+        tops = [t / b if t is not None and b else None for t, b in zip(tops, bottoms)]
 
-    # Bucket by period rather than trusting exact timestamps (CloudWatch aligns
-    # them to the start time; moto, in the tests, doesn't).
-    buckets: dict[int, float] = {}
-    for ts, v in points.items():
-        index = int((ts - start).total_seconds()) // period
-        if 0 <= index < periods:
-            buckets[index] = buckets.get(index, 0) + v if m["stat"] == "Sum" else v
     values, breaching = [], 0
-    for i in range(periods):
-        value = buckets.get(i, fill)
+    for value in tops:
         if value is None:
             values.append("missing")
             breaching += missing_as.lower() == "breaching"
         else:
-            values.append(f"{value:g}")
+            values.append(f"{value:.3g}")
             breaching += breaches(value, threshold)
     met = breaching >= needed
     verdict = "MET." if met else (
         "NOT MET: the metric doesn't support this alarm, so the alarm is likely a manual test or the state is "
         "already stale; look for a cause only if other evidence shows a problem.")
-    return (f"- Condition re-evaluated from the metric: {m['label']} ({m['stat']}) in the last {periods} complete "
-            f"{period // 60}-minute periods ({_iso(start)} to {_iso(end)}): {', '.join(values)}. "
-            f"The alarm needs {needed} of {periods} periods {op} {threshold:g} (missing data: {missing_as}); "
+    if denominator is not None:
+        label = f"{expression} ({numerator['label']} {numerator['stat']} / {denominator['label']} {denominator['stat']})"
+    else:
+        label = f"{numerator['label']} ({numerator['stat']})"
+    return (f"- Condition re-evaluated from the metric: {label} in the last {periods} rolling "
+            f"{period // 60}-minute windows ({_iso(start)} to {_iso(end)}): {', '.join(values)}. "
+            f"The alarm needs {needed} of {periods} windows {op} {threshold:g} (missing data: {missing_as}); "
             f"{breaching} breach. Condition {verdict}")
 
 
@@ -484,7 +524,28 @@ def camera_polls(start: datetime, end: datetime) -> str:
     elif "c325_porch" in errored and "c660_street" in errored:
         fact += ("\n- Porch socket: POSSIBLE. c325_porch and c660_street both errored in this window; check that their "
                  "errors overlap in time and that the other cameras were fine.")
+    elif "c660_street" in errored and "c325_porch" in clean:
+        # 2026-11-26: the C660 failed alone and a report blamed the extender's
+        # socket, although the porch camera on that socket polled fine.
+        fact += ("\n- Porch socket: HAS POWER. c660_street errored but c325_porch (same socket as the extender) polled "
+                 "without errors, so the socket is not the cause. Still possible: the extender itself failed or hung "
+                 "(its power is fine), the C660's Wi-Fi link to it, or the C660 itself (battery, cold).")
+    fact += last_battery_reading(end)
     return fact
+
+
+def last_battery_reading(end: datetime) -> str:
+    """The C660's last BatteryPercent in the 3 days before `end`. It is only
+    sent when a session with the camera worked, so it also dates the last
+    successful contact."""
+    points = _datapoints("Tapo/Camera", "BatteryPercent", [{"Name": "CameraName", "Value": "c660_street"}],
+                         "Minimum", end - timedelta(days=3), end, 300)
+    if not points:
+        return "\n- c660_street battery: no reading in the last 3 days (no successful session, or auto-paused)."
+    ts = max(points)
+    hours = (end - ts).total_seconds() / 3600
+    return (f"\n- c660_street battery: last reading {points[ts]:g}% at {_iso(ts)}, {hours:.1f} h before {_iso(end)} "
+            "(read in every successful session, so this is also the last time the poller reached the camera).")
 
 
 def alarm_context(alarm: dict) -> str:

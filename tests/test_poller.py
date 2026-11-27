@@ -254,6 +254,29 @@ def test_recharged_battery_resumes_downloads_in_the_same_session(poller, fake_ta
     assert fake_tapo.recordings_calls == 2  # yesterday and today
 
 
+class UnreachableTapo(FakeTapo):
+    def __init__(self, *args):
+        raise ConnectionError("Max retries exceeded")
+
+
+@pytest.mark.parametrize("cam_state, expect_check", [
+    ({"auto_paused": True, "last_battery_check": 1000}, True),  # failed probe: next one in probe_interval_seconds
+    ({"auto_paused": False}, False),  # an ordinary failed poll: nothing to schedule
+])
+def test_failed_connect_while_auto_paused_counts_as_a_probe(poller, monkeypatch, tmp_path, cam_state, expect_check):
+    monkeypatch.setattr(poller, "Tapo", UnreachableTapo)
+    cloudwatch = RecordingCloudWatch()
+    state = run_poll(poller, tmp_path, {CAMERA: dict(cam_state)}, cloudwatch=cloudwatch)
+    assert cloudwatch.metrics == ["PollCycleCompleted", "PollCycleErrors"]
+    assert state[CAMERA]["auto_paused"] is cam_state["auto_paused"]
+    if expect_check:
+        assert state[CAMERA]["last_battery_check"] > 1000
+        camera = battery_camera(auto_pause=AUTO_PAUSE)
+        assert poller.seconds_until_battery_check(camera, state[CAMERA]) > 0
+    else:
+        assert "last_battery_check" not in state[CAMERA]
+
+
 def test_poll_override_downloads_while_auto_paused(poller, fake_tapo, tmp_path):
     fake_tapo.battery_percent = 30
     state = run_poll(poller, tmp_path, {}, force_poll=True)
